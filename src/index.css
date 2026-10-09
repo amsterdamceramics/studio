@@ -100,9 +100,9 @@ button {
   height: 24px;
   border-radius: 6px;
 }
+/* Same weight as the name, only greyed, so the two read as one wordmark. */
 .brand-tool {
   color: var(--muted);
-  font-weight: 400;
 }
 .view-toggles,
 .exports {
