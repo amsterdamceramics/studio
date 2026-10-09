@@ -503,8 +503,9 @@ export default function App() {
       <header className="topbar">
         <div className="brand">
           <img className="brand-icon" src={`${import.meta.env.BASE_URL}apple-touch-icon.png`} alt="" width={24} height={24} />
-          <span className="brand-name">Amsterdam Ceramics</span>
-          <span className="brand-tool">Studio</span>
+          <span className="brand-name">
+            Amsterdam Ceramics <span className="brand-tool">Studio</span>
+          </span>
         </div>
         <div className="view-toggles">
           <button type="button" className="toggle" onClick={undo} disabled={steps.undo === 0} title="Undo the last change (⌘Z)">Undo</button>
