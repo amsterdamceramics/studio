@@ -47,4 +47,4 @@ npx tsx scripts/render.ts out.svg 'amsterdam\nceramics' '{"softness":0.5,"blob":
 
 ## Font
 
-Instrument Sans (SIL Open Font License) is bundled in `public/fonts`. The tool is locked to Bold.
+[Instrument Sans](https://fonts.google.com/specimen/Instrument+Sans) is bundled in `public/fonts` under the SIL Open Font License 1.1; the licence text is alongside it in `public/fonts/OFL.txt`. The tool is locked to Bold.
