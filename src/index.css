@@ -93,10 +93,16 @@ button {
   font-weight: 600;
   letter-spacing: -0.01em;
 }
-.brand-logo {
+/* The ac27 mark, squared off like an app icon. */
+.brand-icon {
   display: block;
-  width: auto;
-  height: 30px;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+}
+.brand-tool {
+  color: var(--muted);
+  font-weight: 400;
 }
 .view-toggles,
 .exports {
