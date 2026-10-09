@@ -93,15 +93,10 @@ button {
   font-weight: 600;
   letter-spacing: -0.01em;
 }
-.brand-mark {
-  width: 14px;
-  height: 14px;
-  border-radius: 50% 50% 46% 54% / 58% 52% 48% 42%;
-  background: var(--acid);
-}
-.brand-tool {
-  color: var(--muted);
-  font-weight: 400;
+.brand-logo {
+  display: block;
+  width: auto;
+  height: 30px;
 }
 .view-toggles,
 .exports {

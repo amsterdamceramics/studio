@@ -502,9 +502,7 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <span className="brand-mark" aria-hidden="true" />
-          <span className="brand-name">Amsterdam Ceramics</span>
-          <span className="brand-tool">Studio</span>
+          <img className="brand-logo" src={`${import.meta.env.BASE_URL}logo-white.png`} alt="Amsterdam Ceramics Studio" width={96} height={30} />
         </div>
         <div className="view-toggles">
           <button type="button" className="toggle" onClick={undo} disabled={steps.undo === 0} title="Undo the last change (⌘Z)">Undo</button>
