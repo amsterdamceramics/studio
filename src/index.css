@@ -88,20 +88,24 @@ button {
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 240px;
   font-weight: 600;
   letter-spacing: -0.01em;
 }
-/* The ac27 mark, squared off like an app icon. */
+/* The ac27 mark, squared off like an app icon, as tall as the two lines of the name beside it. */
 .brand-icon {
   display: block;
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
 }
-/* Same weight as the name, only greyed, so the two read as one wordmark. */
+.brand-name {
+  line-height: 1.15;
+}
+/* Same weight as the name, only greyed and on its own line, so the two read as one wordmark. */
 .brand-tool {
+  display: block;
   color: var(--muted);
 }
 .view-toggles,

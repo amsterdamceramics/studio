@@ -502,7 +502,7 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <img className="brand-icon" src={`${import.meta.env.BASE_URL}apple-touch-icon.png`} alt="" width={24} height={24} />
+          <img className="brand-icon" src={`${import.meta.env.BASE_URL}apple-touch-icon.png`} alt="" width={30} height={30} />
           <span className="brand-name">
             Amsterdam Ceramics <span className="brand-tool">Studio</span>
           </span>
