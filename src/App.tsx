@@ -157,7 +157,7 @@ export default function App() {
   const [place, setPlace] = useState<Placement>({ zoom: 1, x: 0, y: 0 })
   const [dropping, setDropping] = useState(false)
   const [crop, setCrop] = useState<'full' | 'blob' | 'letters' | 'window'>('full')
-  const [windowShape, setWindowShape] = useState<WindowShape>({ style: 'roam', size: 0.5, seed: 1 })
+  const [windowShape, setWindowShape] = useState<WindowShape>({ style: 'roam', size: 0.5, seed: 1, round: 0.5 })
   const [hideType, setHideType] = useState(true)
   // With no photo, a shape is filled with a second colour instead.
   const [shapeFill, setShapeFill] = useState('#968FC1')
@@ -350,14 +350,18 @@ export default function App() {
   const treated = useMemo(() => (photo && !fx ? gradientMap(photo.canvas, gmap) : null), [photo, fx, gmap])
 
   /** The shape the photo is cropped to for a given frame, in engine space; null for the full board. */
-  const windows = useRef(new WeakMap<Output, BezierLoop[]>())
+  const windows = useRef(new WeakMap<Output, { shape: WindowShape; cycles: number; loops: BezierLoop[] }>())
   const cropFor = useCallback(
     (o: Output) => {
       if (crop === 'window') {
         // The photo and the type are both clipped by this outline, so it is worked out once per frame.
-        let loops = windows.current.get(o)
-        if (!loops) windows.current.set(o, (loops = clayWindow(o.frame, windowShape, (o.phase * shapeCycles) % 1)))
-        return loops
+        // It is remembered against the settings it was drawn with, so a changed slider redraws it at once.
+        let hit = windows.current.get(o)
+        if (!hit || hit.shape !== windowShape || hit.cycles !== shapeCycles) {
+          hit = { shape: windowShape, cycles: shapeCycles, loops: clayWindow(o.frame, windowShape, (o.phase * shapeCycles) % 1) }
+          windows.current.set(o, hit)
+        }
+        return hit.loops
       }
       if (crop === 'letters') return o.loops
       if (crop === 'blob') return clayFrame(o.frame, type.padding * EM, blob, shapeMove !== 'off' ? { motion: shapeMove, phase: (o.phase * shapeCycles) % 1, rest: shapeRest } : undefined)
@@ -365,10 +369,6 @@ export default function App() {
     },
     [crop, blob, windowShape, shapeMove, shapeCycles, shapeRest, type.padding],
   )
-  // A new outline has to be drawn when the window's settings change, even for the same frame.
-  useEffect(() => {
-    windows.current = new WeakMap()
-  }, [windowShape, shapeCycles])
   /** Where the type may show. With a window, the moving layer sits above the type and hides it. */
   const typeClipFor = useCallback(
     (o: Output): TypeClip | null => {
@@ -586,7 +586,7 @@ export default function App() {
                     onClick={() => {
                       setCrop('full')
                       setBlob({ seed: 1, size: 0.9 })
-                      setWindowShape({ style: 'roam', size: 0.5, seed: 1 })
+                      setWindowShape({ style: 'roam', size: 0.5, seed: 1, round: 0.5 })
                       setHideType(true)
                       setShapeMotion('follow')
                       setShapeSpeed(1)
@@ -628,6 +628,7 @@ export default function App() {
                       ))}
                     </select>
                     <p className="motion-hint">{WINDOW_STYLES.find((w) => w.id === windowShape.style)?.hint}</p>
+                    <Slider label="Roundness" hint="From lively tips and droplets to a few smooth pebbles" value={windowShape.round} reset={0.5} onChange={(v) => setWindowShape({ ...windowShape, round: v })} />
                     <Slider label={photo ? 'Amount of photo' : 'Amount of colour'} value={windowShape.size} reset={0.5} onChange={(v) => setWindowShape({ ...windowShape, size: v })} />
                     <Slider
                       label="Speed"

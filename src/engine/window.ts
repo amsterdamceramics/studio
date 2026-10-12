@@ -1,4 +1,4 @@
-import { contour, type Field } from './field'
+import { contour, gaussian, type Field } from './field'
 import { fitClosed } from './fit'
 import { resample, taubin } from './smooth'
 import type { Frame } from './svg'
@@ -28,6 +28,8 @@ export interface WindowShape {
   size: number
   /** Picks which drifting pattern is used. */
   seed: number
+  /** 0..1: 0 keeps every tip, neck and droplet; 1 leaves a few smooth pebbles. */
+  round: number
 }
 
 const TAU = Math.PI * 2
@@ -52,7 +54,12 @@ function makeNoise(seed: number) {
 export function clayWindow(frame: Frame, shape: WindowShape, phase: number): BezierLoop[] {
   // The field is smooth, so a coarse grid is enough: the outline is found between samples.
   const cell = frame.w / 96
-  const pad = 2
+  const round = Math.min(1, Math.max(0, shape.round))
+  // Rounding is the type's own recipe applied to the window: blur the shape, cut it again. Nothing
+  // can then curve tighter than the blur allows, which is what makes the type read as clay.
+  const sigma = round * 4.2
+  // The field has to carry on past the board by the blur's reach, or shapes would round off at the edge.
+  const pad = 2 + Math.ceil(sigma * 3)
   const gw = Math.ceil(frame.w / cell) + 1 + pad * 2
   const gh = Math.ceil(frame.h / cell) + 1 + pad * 2
   const data = new Float32Array(gw * gh)
@@ -61,8 +68,10 @@ export function clayWindow(frame: Frame, shape: WindowShape, phase: number): Bez
   // Everything drifts along closed paths, so phase 0 and 1 are the same frame.
   const ca = 0.9 * Math.cos(a)
   const sa = 0.9 * Math.sin(a)
+  // The finer layer of the field is what draws tips and droplets, so roundness fades it out as well.
+  const detail = 0.38 * (1 - round)
   const drift = (u: number, v: number, scale: number) =>
-    noise(u * scale + ca, v * scale + sa) * 0.62 + noise(u * scale * 2.1 + 7 - 0.78 * sa, v * scale * 2.1 + 3 + 0.78 * ca) * 0.38
+    noise(u * scale + ca, v * scale + sa) * (1 - detail) + noise(u * scale * 2.1 + 7 - 0.78 * sa, v * scale * 2.1 + 3 + 0.78 * ca) * detail
 
   const H = frame.h / frame.w
   const bias = (shape.size - 0.5) * 0.5
@@ -97,10 +106,20 @@ export function clayWindow(frame: Frame, shape: WindowShape, phase: number): Bez
     }
   }
 
-  const field: Field = { data, w: gw, h: gh, x0: frame.x - pad * cell, y0: frame.y - pad * cell, cell }
+  let field: Field = { data, w: gw, h: gh, x0: frame.x - pad * cell, y0: frame.y - pad * cell, cell }
+  let level = 0
+  if (sigma > 0.05) {
+    // Turn the field into "inside or outside" with a soft edge, blur that, and cut it at half.
+    for (let k = 0; k < data.length; k++) {
+      const t = Math.min(1, Math.max(0, data[k] / 0.06 + 0.5))
+      data[k] = t * t * (3 - 2 * t)
+    }
+    field = gaussian(field, sigma)
+    level = 0.5
+  }
   const step = frame.w / 220
   const loops: BezierLoop[] = []
-  for (const poly of contour(field, 0)) {
+  for (const poly of contour(field, level)) {
     if (poly.length < 8) continue
     loops.push(fitClosed(taubin(resample(poly, step), 3), frame.w * 0.0012))
   }
