@@ -66,19 +66,20 @@ export function clayWindow(frame: Frame, shape: WindowShape, phase: number): Bez
   const noise = makeNoise(shape.seed)
   const a = phase * TAU
   // Everything drifts along closed paths, so phase 0 and 1 are the same frame.
-  const ca = 0.9 * Math.cos(a)
-  const sa = 0.9 * Math.sin(a)
-  // The shape keeps changing because the field is two large layers circling in opposite directions:
+  const ca = 0.55 * Math.cos(a)
+  const sa = 0.55 * Math.sin(a)
+  // The shape keeps changing because the field is two large layers moving against each other:
   // where they reinforce each other moves around, so lumps swell, meet and part instead of gliding
   // along as one fixed pattern. That is true at every roundness. The third, finer layer only draws
   // tips and droplets, so it is the one roundness fades out.
   const detail = 0.38 * (1 - round)
   const drift = (u: number, v: number, scale: number) => {
     const one = noise(u * scale + ca, v * scale + sa)
-    const two = noise(u * scale * 1.27 + 11.3 + ca, v * scale * 1.27 + 5.7 - sa)
+    // Exactly opposite the first layer, so the two cancel as a slide and what is left is change of form.
+    const two = noise(u * scale * 1.27 + 11.3 - ca * 1.27, v * scale * 1.27 + 5.7 - sa * 1.27)
     // Two layers averaged would be flatter than one, so the sum is scaled to keep the same contrast.
     const large = 0.5 + (one + two - 1) * 0.7071
-    return large * (1 - detail) + noise(u * scale * 2.1 + 7 - 0.78 * sa, v * scale * 2.1 + 3 + 0.78 * ca) * detail
+    return large * (1 - detail) + noise(u * scale * 2.1 + 7 - 1.25 * sa, v * scale * 2.1 + 3 + 1.25 * ca) * detail
   }
 
   const H = frame.h / frame.w
