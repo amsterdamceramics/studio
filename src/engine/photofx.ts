@@ -1,3 +1,4 @@
+import { CUT_EDGE, DETAIL_GAIN, cutFields, levelsOf, type ClayCut } from './claycut'
 import type { GradientMap, Placement } from './image'
 
 /**
@@ -37,6 +38,8 @@ export interface FxFrame {
   swapTo: { shadow: string; highlight: string }
   /** Picks where the bleed spots sit. */
   seed: number
+  /** Clay cut instead of the gradient map: two flat colours, the map's shadow as ink and its highlight as ground. */
+  cut: ClayCut | null
 }
 
 const VERT = `
@@ -47,7 +50,7 @@ void main() {
   gl_Position = vec4(aPos, 0.0, 1.0);
 }`
 
-const FRAG = `
+const FRAG = /* glsl */ `
 precision highp float;
 varying vec2 vUv;
 uniform sampler2D uPhoto;
@@ -66,6 +69,10 @@ uniform float uMapOn;
 uniform float uGamma;
 uniform float uGain;
 uniform vec4 uSpots[8];
+uniform sampler2D uCut;
+uniform float uCutOn;
+uniform vec2 uLevels;
+uniform vec3 uCutSet;
 
 float curve(float l) {
   float t = pow(clamp(l, 0.0, 1.0), uGamma);
@@ -96,6 +103,16 @@ float bleed(vec2 uv, vec2 n, float feather) {
 
 void main() {
   vec2 puv = uXform.xy + vUv * uXform.zw;
+  if (uCutOn > 0.5) {
+    // Clay cut: R is the tones after the cut's blur, G after the wide blur Detail compares against.
+    vec2 c = texture2D(uCut, puv).rg;
+    vec2 t = clamp((c - uLevels.x) / (uLevels.y - uLevels.x), 0.0, 1.0);
+    if (uCutSet.z < 0.5) t = 1.0 - t;
+    float f = mix(t.x, 0.5 + (t.x - t.y) * ${DETAIL_GAIN.toFixed(2)}, uCutSet.y);
+    float ink = smoothstep(uCutSet.x - ${CUT_EDGE}, uCutSet.x + ${CUT_EDGE}, f);
+    gl_FragColor = vec4(mix(uHiA, uLoA, ink), 1.0);
+    return;
+  }
   vec3 src = texture2D(uPhoto, puv).rgb;
   vec2 blurred = texture2D(uBlur, puv).rg;
   vec2 n = texture2D(uNoise, vUv * vec2(1.0, uAspect)).rg;
@@ -248,6 +265,13 @@ export class PhotoFx {
   private photo: WebGLTexture
   private blur: WebGLTexture
   private size = { w: 1, h: 1 }
+  private cutTex: WebGLTexture
+  private source: { el: HTMLCanvasElement | HTMLVideoElement; still: boolean } | null = null
+  /** The softness the cut texture was made at; null when it needs making. */
+  private cutMadeAt: number | null = null
+  private levels: [number, number] = [0, 255]
+  /** A new picture: its levels are taken as they are instead of eased toward. */
+  private fresh = true
 
   /** Null when the browser has no WebGL; the caller then shows the photo without effects. */
   static create(): PhotoFx | null {
@@ -287,7 +311,7 @@ export class PhotoFx {
     gl.enableVertexAttribArray(pos)
     gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0)
 
-    for (const name of ['uPhoto', 'uBlur', 'uNoise', 'uXform', 'uAspect', 'uPhase', 'uStrength', 'uEffect', 'uLoA', 'uHiA', 'uLoB', 'uHiB', 'uMapOn', 'uGamma', 'uGain', 'uSpots']) {
+    for (const name of ['uPhoto', 'uBlur', 'uNoise', 'uXform', 'uAspect', 'uPhase', 'uStrength', 'uEffect', 'uLoA', 'uHiA', 'uLoB', 'uHiB', 'uMapOn', 'uGamma', 'uGain', 'uSpots', 'uCut', 'uCutOn', 'uLevels', 'uCutSet']) {
       this.uniforms[name] = gl.getUniformLocation(program, name)
     }
 
@@ -309,10 +333,15 @@ export class PhotoFx {
     gl.uniform1i(this.uniforms.uPhoto, 0)
     gl.uniform1i(this.uniforms.uBlur, 1)
     gl.uniform1i(this.uniforms.uNoise, 2)
+    this.cutTex = texture(3, false)
+    gl.uniform1i(this.uniforms.uCut, 3)
   }
 
   /** Upload a photo, and the two blurred versions of its tones the effects lean on. */
   setPhoto(photo: HTMLCanvasElement) {
+    this.source = { el: photo, still: true }
+    this.cutMadeAt = null
+    this.fresh = true
     this.upload(photo, photo.width, photo.height, 384)
   }
 
@@ -322,6 +351,9 @@ export class PhotoFx {
    */
   setFrame(video: HTMLVideoElement) {
     if (!video.videoWidth) return
+    if (this.source?.el !== video) this.fresh = true
+    this.source = { el: video, still: false }
+    this.cutMadeAt = null
     this.upload(video, video.videoWidth, video.videoHeight, 224)
   }
 
@@ -371,6 +403,32 @@ export class PhotoFx {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, packed)
   }
 
+  /**
+   * The tone fields Clay cut is made from. A still is worked out again only when the softness
+   * changes; a video every frame, with its levels eased so the cut does not flicker as the light changes.
+   */
+  private makeCut(softness: number) {
+    if (!this.source || this.cutMadeAt === softness) return
+    const { el, still } = this.source
+    const fields = cutFields(el, this.size.w, this.size.h, still ? 720 : 400, softness)
+    const [lo, hi] = levelsOf(fields.cut)
+    const ease = still || this.fresh ? 1 : 0.3
+    this.levels = [this.levels[0] + (lo - this.levels[0]) * ease, this.levels[1] + (hi - this.levels[1]) * ease]
+    this.fresh = false
+    const packed = new Uint8Array(fields.w * fields.h * 4)
+    for (let i = 0; i < fields.w * fields.h; i++) {
+      packed[i * 4] = fields.cut[i]
+      packed[i * 4 + 1] = fields.wide[i]
+      packed[i * 4 + 3] = 255
+    }
+    const gl = this.gl
+    gl.activeTexture(gl.TEXTURE3)
+    gl.bindTexture(gl.TEXTURE_2D, this.cutTex)
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, fields.w, fields.h, 0, gl.RGBA, gl.UNSIGNED_BYTE, packed)
+    this.cutMadeAt = softness
+  }
+
   /** Draw one frame. The returned canvas is reused, so copy it out before rendering the next. */
   render(f: FxFrame): HTMLCanvasElement {
     const gl = this.gl
@@ -401,6 +459,12 @@ export class PhotoFx {
     gl.uniform1f(u.uGamma, Math.pow(2, -f.map.brightness * 1.5))
     gl.uniform1f(u.uGain, f.map.contrast >= 0 ? 1 + f.map.contrast * 2 : 1 + f.map.contrast * 0.9)
     gl.uniform4fv(u.uSpots, spots(f.seed))
+    gl.uniform1f(u.uCutOn, f.cut ? 1 : 0)
+    if (f.cut) {
+      this.makeCut(f.cut.softness)
+      gl.uniform2f(u.uLevels, this.levels[0] / 255, this.levels[1] / 255)
+      gl.uniform3f(u.uCutSet, f.cut.level, f.cut.detail, f.cut.light ? 1 : 0)
+    }
     gl.drawArrays(gl.TRIANGLES, 0, 3)
     return this.canvas
   }

@@ -32,6 +32,9 @@ import {
   type Frame,
   type BlobShape,
   type GradientMap,
+  type ClayCut,
+  CLAY_CUT,
+  autoClayCut,
   type PhotoEffect,
   type TypeClip,
   type WindowShape,
@@ -161,6 +164,9 @@ export default function App() {
   // Bumped when a paused video lands on a new frame, so the board redraws with it.
   const [frameTick, setFrameTick] = useState(0)
   const [gmap, setGmap] = useState<GradientMap>({ enabled: true, shadow: RAMPS[0].shadow, highlight: RAMPS[0].highlight, contrast: 0, brightness: 0 })
+  // Colouring the photo: a gradient map, or Clay cut, two flat colours cut from it like the type.
+  const [look, setLook] = useState<'map' | 'cut'>('map')
+  const [cut, setCut] = useState<ClayCut>(CLAY_CUT)
   const [place, setPlace] = useState<Placement>({ zoom: 1, x: 0, y: 0 })
   const [dropping, setDropping] = useState(false)
   const [crop, setCrop] = useState<'full' | 'blob' | 'letters' | 'window'>('full')
@@ -197,7 +203,8 @@ export default function App() {
   // type and shape share one loop so a recording closes on both.
   const shapeMove: Motion = crop === 'blob' ? (shapeMotion === 'follow' ? motion : shapeMotion) : 'off'
   // One moving thing per layout: a photo effect belongs to the full-board layout only.
-  const liveEffect: PhotoEffect = crop === 'full' ? effect : 'off'
+  // Clay cut is a look of its own, so the effects, which work on the gradient map's tones, stand down.
+  const liveEffect: PhotoEffect = crop === 'full' && look === 'map' ? effect : 'off'
   const fxOn = !!photo && !!fx && liveEffect !== 'off'
   const clip = photo?.video ? Math.max(0.5, trim.end - trim.start) : 0
   const moving = motion !== 'off' || shapeMove !== 'off' || fxOn || crop === 'window' || clip > 0
@@ -297,7 +304,7 @@ export default function App() {
 
   // Undo. Everything that makes up the artwork is gathered into one snapshot; a change is committed
   // to history once it has settled for a moment, so dragging a slider is one step, not hundreds.
-  const snap = { type, params, fill, background, transparent, motion: motionSet, typeSpeed, restBy, photo, trim, gmap, place, crop, blob, windowShape, hideType, shapeFill, shapeMotion, shapeSpeed, effect, fxTune, fxSeed, swapTo }
+  const snap = { type, params, fill, background, transparent, motion: motionSet, typeSpeed, restBy, photo, trim, gmap, look, cut, place, crop, blob, windowShape, hideType, shapeFill, shapeMotion, shapeSpeed, effect, fxTune, fxSeed, swapTo }
   type Snap = typeof snap
   const sameAs = (a: Snap, b: Snap) => (Object.keys(a) as (keyof Snap)[]).every((k) => a[k] === b[k])
   const history = useRef<{ committed: Snap; undo: Snap[]; redo: Snap[] } | null>(null)
@@ -333,6 +340,8 @@ export default function App() {
     setPhoto(to.photo)
     setTrim(to.trim)
     setGmap(to.gmap)
+    setLook(to.look)
+    setCut(to.cut)
     setPlace(to.place)
     setCrop(to.crop)
     setBlob(to.blob)
@@ -446,14 +455,14 @@ export default function App() {
         ? (ctx: CanvasRenderingContext2D, cw: number, ch: number) => {
             // A video hands the renderer whatever frame it is showing right now.
             if (photo.video) fx.setFrame(photo.video)
-            return ctx.drawImage(fx.render({ width: cw, height: ch, place, map: gmap, effect: liveEffect, phase: (o.phase * fxCycles) % 1, strength: tune.strength, swapTo: to, seed: fxSeed }), 0, 0, cw, ch)
+            return ctx.drawImage(fx.render({ width: cw, height: ch, place, map: gmap, effect: liveEffect, phase: (o.phase * fxCycles) % 1, strength: tune.strength, swapTo: to, seed: fxSeed, cut: look === 'cut' ? cut : null }), 0, 0, cw, ch)
           }
         : treated
           ? coverPainter(treated, place)
           : null
       return composeBackdrop(w * density, h * density, w, background, paint, { clip: shape ? pathData(shape, o.frame) : undefined, bare })
     },
-    [photo, fx, treated, gmap, liveEffect, swapTo, fxSeed, fxCycles, tune.strength, place, background, cropFor, crop, shapeFill],
+    [photo, fx, treated, gmap, look, cut, liveEffect, swapTo, fxSeed, fxCycles, tune.strength, place, background, cropFor, crop, shapeFill],
   )
   const backdrop = useMemo(() => (out ? backdropFor(out, 1) : null), [out, backdropFor])
   const typeHide = useMemo(() => {
@@ -847,7 +856,7 @@ export default function App() {
               </Section>
             )}
 
-            {photo && fx && crop === 'full' && (
+            {photo && fx && crop === 'full' && look === 'map' && (
               <Section
                 title="Photo effect"
                 action={
@@ -914,16 +923,34 @@ export default function App() {
 
             {photo && (
               <Section
-                title="Gradient map"
+                title="Colour"
                 action={
                   <span className="actions">
-                    <button type="button" className="link" onClick={() => setGmap({ ...gmap, enabled: !gmap.enabled })}>
-                      {gmap.enabled ? 'On' : 'Off'}
-                    </button>
-                    <Reset onClick={() => setGmap({ enabled: true, shadow: RAMPS[0].shadow, highlight: RAMPS[0].highlight, contrast: 0, brightness: 0 })} />
+                    {look === 'map' && (
+                      <button type="button" className="link" onClick={() => setGmap({ ...gmap, enabled: !gmap.enabled })}>
+                        {gmap.enabled ? 'On' : 'Off'}
+                      </button>
+                    )}
+                    <Reset
+                      onClick={() => {
+                        setGmap({ enabled: true, shadow: RAMPS[0].shadow, highlight: RAMPS[0].highlight, contrast: 0, brightness: 0 })
+                        setCut(CLAY_CUT)
+                      }}
+                    />
                   </span>
                 }
               >
+                {fx && (
+                  <Segmented
+                    label="Look"
+                    value={look}
+                    onChange={setLook}
+                    options={[
+                      { id: 'map', label: 'Gradient map', title: 'The photo in two colours, with every tone between them' },
+                      { id: 'cut', label: 'Clay cut', title: 'The photo cut into two flat colours with soft clay edges' },
+                    ]}
+                  />
+                )}
                 <div className="chips">
                   {RAMPS.map((r) => (
                     <button
@@ -936,17 +963,58 @@ export default function App() {
                     </button>
                   ))}
                 </div>
-                <div className="ramp" style={{ background: `linear-gradient(to right, ${gmap.shadow}, ${gmap.highlight})` }} aria-hidden="true" />
-                <div className="field">
-                  <span className="field-label">Shadows</span>
-                  <Swatches value={gmap.shadow} onChange={(v) => setGmap({ ...gmap, enabled: true, shadow: v })} label="Shadow colour" />
-                </div>
-                <div className="field">
-                  <span className="field-label">Highlights</span>
-                  <Swatches value={gmap.highlight} onChange={(v) => setGmap({ ...gmap, enabled: true, highlight: v })} label="Highlight colour" />
-                </div>
-                <Slider label="Contrast" value={gmap.contrast} min={-1} max={1} step={0.01} reset={0} format={(v) => `${Math.round(v * 100)}`} onChange={(v) => setGmap({ ...gmap, contrast: v })} />
-                <Slider label="Brightness" value={gmap.brightness} min={-1} max={1} step={0.01} reset={0} format={(v) => `${Math.round(v * 100)}`} onChange={(v) => setGmap({ ...gmap, brightness: v })} />
+                {look === 'map' ? (
+                  <>
+                    <div className="ramp" style={{ background: `linear-gradient(to right, ${gmap.shadow}, ${gmap.highlight})` }} aria-hidden="true" />
+                    <div className="field">
+                      <span className="field-label">Shadows</span>
+                      <Swatches value={gmap.shadow} onChange={(v) => setGmap({ ...gmap, enabled: true, shadow: v })} label="Shadow colour" />
+                    </div>
+                    <div className="field">
+                      <span className="field-label">Highlights</span>
+                      <Swatches value={gmap.highlight} onChange={(v) => setGmap({ ...gmap, enabled: true, highlight: v })} label="Highlight colour" />
+                    </div>
+                    <Slider label="Contrast" value={gmap.contrast} min={-1} max={1} step={0.01} reset={0} format={(v) => `${Math.round(v * 100)}`} onChange={(v) => setGmap({ ...gmap, contrast: v })} />
+                    <Slider label="Brightness" value={gmap.brightness} min={-1} max={1} step={0.01} reset={0} format={(v) => `${Math.round(v * 100)}`} onChange={(v) => setGmap({ ...gmap, brightness: v })} />
+                  </>
+                ) : (
+                  <>
+                    <div className="field">
+                      <span className="field-label">Ink</span>
+                      <Swatches value={gmap.shadow} onChange={(v) => setGmap({ ...gmap, shadow: v })} label="Ink colour" />
+                    </div>
+                    <div className="field">
+                      <span className="field-label">Ground</span>
+                      <Swatches value={gmap.highlight} onChange={(v) => setGmap({ ...gmap, highlight: v })} label="Ground colour" />
+                    </div>
+                    <div className="field">
+                      <span className="field-label">Ink on</span>
+                      <Segmented
+                        label="Ink on"
+                        value={cut.light ? 'light' : 'dark'}
+                        onChange={(v) => setCut({ ...cut, light: v === 'light' })}
+                        options={[
+                          { id: 'dark', label: 'Darks' },
+                          { id: 'light', label: 'Lights' },
+                        ]}
+                      />
+                    </div>
+                    <Slider label="Softness" hint="How rounded the shapes are" value={cut.softness} reset={CLAY_CUT.softness} onChange={(v) => setCut({ ...cut, softness: v })} />
+                    <Slider label="Cut" hint="Higher leaves less ink" value={cut.level} min={0.15} max={0.85} reset={CLAY_CUT.level} onChange={(v) => setCut({ ...cut, level: v })} />
+                    <Slider label="Detail" hint="0 is one abstract mass; higher keeps faces and features recognisable" value={cut.detail} reset={CLAY_CUT.detail} onChange={(v) => setCut({ ...cut, detail: v })} />
+                    <button
+                      type="button"
+                      className="btn"
+                      title={photo.video ? 'Picks the settings for the frame showing now' : 'Picks the settings for this photo'}
+                      onClick={() => {
+                        const v = photo.video
+                        setCut(v ? autoClayCut(v, v.videoWidth, v.videoHeight) : autoClayCut(photo.canvas, photo.canvas.width, photo.canvas.height))
+                      }}
+                    >
+                      Auto
+                    </button>
+                  </>
+                )}
               </Section>
             )}
           </>

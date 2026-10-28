@@ -9,3 +9,4 @@ export { WINDOW_STYLES, clayWindow, type WindowShape, type WindowStyle } from '.
 export { canvasBlob, composeBackdrop, coverPainter, gradientMap, loadPhoto, loadVideo, type GradientMap, type Placement } from './image'
 export { PHOTO_EFFECTS, PhotoFx, type PhotoEffect } from './photofx'
 export { clayFrame, type BlobShape, type FrameMotion } from './blob'
+export { CLAY_CUT, autoClayCut, type ClayCut } from './claycut'
