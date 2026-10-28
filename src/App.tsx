@@ -43,6 +43,7 @@ import {
   type Motion,
   type OrganicParams,
 } from './engine'
+import { canEncode, encodeMp4, loopedSound } from './engine/video'
 import { COLORS, PRESETS, RAMPS } from './presets'
 import { IconButton, Panel, Reset, Section, Segmented, Slider, Toggle } from './ui/controls'
 import { AlignBottom, AlignCentre, AlignLeft, AlignMiddle, AlignRight, AlignTop, Minus, Plus, RedoIcon, SidebarLeft, SidebarRight, UndoIcon } from './ui/icons'
@@ -314,6 +315,8 @@ export default function App() {
   const [out, setOut] = useState<Output | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const [recording, setRecording] = useState(false)
+  // How far an export has rendered, 0 to 1.
+  const [progress, setProgress] = useState(0)
   const [loops, setLoops] = useState<'1' | '2' | '3'>('2')
   // Each motion keeps its own resting amount.
   const [restBy, setRestBy] = useState<Partial<Record<Motion, number>>>({})
@@ -323,7 +326,7 @@ export default function App() {
   const [leftOpen, setLeftOpen] = useState<string | null>('Templates')
   const [rightOpen, setRightOpen] = useState<string | null>('Clay')
   // A photo, or a video: then `canvas` is a still of its first frame and `video` plays underneath.
-  const [photo, setPhoto] = useState<{ canvas: HTMLCanvasElement; name: string; video?: HTMLVideoElement; duration?: number } | null>(null)
+  const [photo, setPhoto] = useState<{ canvas: HTMLCanvasElement; name: string; video?: HTMLVideoElement; file?: File; duration?: number } | null>(null)
   // The section of a video that plays and loops, in seconds.
   const [trim, setTrim] = useState({ start: 0, end: 0 })
   const [keepSound, setKeepSound] = useState(false)
@@ -745,7 +748,7 @@ export default function App() {
         photo?.video?.pause()
         const { video, still, duration } = await loadVideo(file)
         fx.setPhoto(still)
-        setPhoto({ canvas: still, name: file.name, video, duration })
+        setPhoto({ canvas: still, name: file.name, video, file, duration })
         setTrim({ start: 0, end: duration })
         setPlace({ zoom: 1, x: 0, y: 0 })
         phaseRef.current = 0
@@ -801,6 +804,7 @@ export default function App() {
   const audioGraph = useRef<{ audio: AudioContext; dest: MediaStreamAudioDestinationNode; video: HTMLVideoElement } | null>(null)
   const record = async () => {
     if (!ts || !moving || recording) return
+    if (canEncode()) return encode()
     const mime = ['video/mp4;codecs=avc1', 'video/webm;codecs=vp9', 'video/webm'].find((m) => MediaRecorder.isTypeSupported(m))
     if (!mime) return flash('This browser cannot record video')
     setRecording(true)
@@ -867,6 +871,54 @@ export default function App() {
     drawToCanvas(ctx, textOf(first), first.frame, background, backdropFor(first, density), typeClipFor(first))
     rec.start()
     requestAnimationFrame(step)
+  }
+
+  /** Renders the loop frame by frame at a steady rate, seeking the clip to each frame's time, and encodes it as MP4. */
+  const encode = async () => {
+    if (!ts) return
+    setRecording(true)
+    setProgress(0)
+    const first = render(ts, type, layers, grid, params, motion, 0, rest, typeCycles)
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.round((first.frame.w * first.frame.scale) / 2) * 2
+    canvas.height = Math.round((first.frame.h * first.frame.scale) / 2) * 2
+    const ctx = canvas.getContext('2d')!
+    const density = canvas.width / Math.round(first.frame.w * first.frame.scale)
+    const fps = 30
+    const total = Number(loops) * seconds
+    const frames = Math.round(total * fps)
+    const video = photo?.video
+    video?.pause()
+    const seek = (v: HTMLVideoElement, at: number) =>
+      new Promise<void>((done) => {
+        if (Math.abs(v.currentTime - at) < 0.001 && v.readyState >= 2) return done()
+        v.addEventListener('seeked', () => done(), { once: true })
+        v.currentTime = at
+      })
+    try {
+      const sound = video && keepSound && photo?.file ? await loopedSound(photo.file, trim.start, clip, total) : null
+      const blob = await encodeMp4({
+        canvas,
+        fps,
+        frames,
+        sound,
+        onProgress: (f) => setProgress(f),
+        draw: async (i) => {
+          const p = ((i / fps) / seconds) % 1
+          if (video) await seek(video, trim.start + p * clip)
+          const o = render(ts, type, layers, grid, params, motion, p, rest, typeCycles)
+          drawToCanvas(ctx, textOf(o), o.frame, background, backdropFor(o, density), typeClipFor(o))
+          // The board follows along every few frames, without slowing the render down.
+          if (i % 6 === 0) setOut(o)
+        },
+      })
+      download(`${name}-${motion !== 'off' ? motion : windowOn ? windowShape.style : shapeMove !== 'off' ? shapeMove : effect}.mp4`, blob)
+      flash('Video saved')
+    } catch (e) {
+      flash(`Export failed: ${(e as Error).message}`)
+    } finally {
+      setRecording(false)
+    }
   }
 
   const placeLayer = (where: 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom') => {
@@ -940,7 +992,7 @@ export default function App() {
         <div className="exports">
           {moving && (
             <button type="button" className="btn" onClick={record} disabled={recording}>
-              {recording ? 'Recording' : `Video ${secs(Number(loops) * seconds)} s`}
+              {recording ? `Rendering ${Math.round(progress * 100)}%` : `Video ${secs(Number(loops) * seconds)} s`}
             </button>
           )}
           <button type="button" className="btn" onClick={() => exportAs('copy')}>Copy SVG</button>
