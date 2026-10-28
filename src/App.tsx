@@ -44,7 +44,7 @@ import {
   type OrganicParams,
 } from './engine'
 import { COLORS, PRESETS, RAMPS } from './presets'
-import { Section, Segmented, Slider, Toggle } from './ui/controls'
+import { Panel, Section, Segmented, Slider, Toggle } from './ui/controls'
 import { Stage, type View } from './ui/Stage'
 
 const BOARDS = [
@@ -289,6 +289,9 @@ export default function App() {
   const [restBy, setRestBy] = useState<Partial<Record<Motion, number>>>({})
   const restOf = (m: Motion) => restBy[m] ?? REST[m].start
   const [tab, setTab] = useState<'type' | 'image'>('type')
+  // The open card in each side panel; each tab opens on its first card.
+  const [leftOpen, setLeftOpen] = useState<string | null>('Text')
+  const [rightOpen, setRightOpen] = useState<string | null>('Clay')
   // A photo, or a video: then `canvas` is a still of its first frame and `video` plays underneath.
   const [photo, setPhoto] = useState<{ canvas: HTMLCanvasElement; name: string; video?: HTMLVideoElement; duration?: number } | null>(null)
   // The section of a video that plays and loops, in seconds.
@@ -819,14 +822,21 @@ export default function App() {
       </header>
 
       <aside className="panel left">
+        <Panel open={leftOpen} setOpen={setLeftOpen}>
         <div className="tabs" role="tablist" aria-label="Layer to edit">
-          <button type="button" role="tab" aria-selected={tab === 'type'} className={`chip ${tab === 'type' ? 'on' : ''}`} onClick={() => setTab('type')}>Type</button>
-          <button type="button" role="tab" aria-selected={tab === 'image'} className={`chip ${tab === 'image' ? 'on' : ''}`} onClick={() => setTab('image')}>Image</button>
+          <button type="button" role="tab" aria-selected={tab === 'type'} className={`chip ${tab === 'type' ? 'on' : ''}`} onClick={() => {
+            setTab('type')
+            setLeftOpen('Text')
+          }}>Type</button>
+          <button type="button" role="tab" aria-selected={tab === 'image'} className={`chip ${tab === 'image' ? 'on' : ''}`} onClick={() => {
+            setTab('image')
+            setLeftOpen('Photo')
+          }}>Image</button>
         </div>
 
         {tab === 'image' && (
           <>
-            <Section title="Photo">
+            <Section title="Photo" summary={photo ? (photo.video ? `Video · ${secs(trim.end - trim.start)} s` : 'Photo') : 'None'}>
               {photo ? (
                 <div className="photo-row">
                   <span className="photo-name" title={photo.name}>
@@ -892,7 +902,7 @@ export default function App() {
             </Section>
 
             {photo && (
-              <Section title="Crop" action={<Reset onClick={() => setPlace({ zoom: 1, x: 0, y: 0 })} />}>
+              <Section title="Crop" summary={`${Math.round(place.zoom * 100)}%`} action={<Reset onClick={() => setPlace({ zoom: 1, x: 0, y: 0 })} />}>
                 <Slider label="Zoom" value={place.zoom} min={1} max={3} step={0.01} reset={1} format={(v) => `${Math.round(v * 100)}%`} onChange={(v) => setPlace({ ...place, zoom: v })} />
                 <Slider label="Left to right" value={place.x} min={-1} max={1} step={0.01} reset={0} format={(v) => `${Math.round(v * 100)}`} onChange={(v) => setPlace({ ...place, x: v })} />
                 <Slider label="Top to bottom" value={place.y} min={-1} max={1} step={0.01} reset={0} format={(v) => `${Math.round(v * 100)}`} onChange={(v) => setPlace({ ...place, y: v })} />
@@ -902,6 +912,7 @@ export default function App() {
             {(
               <Section
                 title="Layout"
+                summary={LAYOUTS.find((l) => l.id === crop)?.label}
                 action={
                   <Reset
                     onClick={() => {
@@ -1035,6 +1046,7 @@ export default function App() {
             {photo && fx && crop === 'full' && look === 'map' && (
               <Section
                 title="Photo effect"
+                summary={PHOTO_EFFECTS.find((e) => e.id === effect)?.label}
                 action={
                   <Reset
                     onClick={() => {
@@ -1100,6 +1112,7 @@ export default function App() {
             {photo && (
               <Section
                 title="Colour"
+                summary={look === 'cut' ? 'Clay cut' : gmap.enabled ? (RAMPS.find((r) => r.shadow === gmap.shadow && r.highlight === gmap.highlight)?.label ?? 'Custom') : 'Off'}
                 action={
                   <span className="actions">
                     {look === 'map' && (
@@ -1198,7 +1211,7 @@ export default function App() {
 
         {tab === 'type' && (
         <>
-        <Section title="Templates">
+        <Section title="Templates" summary="Main visual">
           <div className="chips">
             {TEMPLATES.map((t) => (
               <button key={t.id} type="button" className="chip" title={t.title} onClick={() => applyTemplate(t)}>
@@ -1210,6 +1223,7 @@ export default function App() {
 
         <Section
           title="Text"
+          summary={fixed.w ? `${layers.length} ${layers.length === 1 ? 'text' : 'texts'}` : layers[0].text.split('\n')[0]}
           action={
             fixed.w > 0 && layers.length > 1 ? (
               <button type="button" className="link" onClick={deleteLayer}>
@@ -1243,9 +1257,6 @@ export default function App() {
           ) : (
             <p className="motion-hint">Pick a board size to add more text</p>
           )}
-        </Section>
-
-        <Section title="Typography">
           <div className="field">
             <span className="field-label">Font</span>
             <span className="locked">Instrument Sans Bold</span>
@@ -1299,7 +1310,7 @@ export default function App() {
         </>
         )}
 
-        <Section title="Canvas">
+        <Section title="Canvas" summary={BOARDS.find((b) => b.id === type.board)?.label}>
           <div className="field">
             <span className="field-label">Board</span>
             <Segmented label="Board size" value={type.board} onChange={(v) => setT('board', v)} options={BOARDS.map((b) => ({ id: b.id, label: b.label, title: b.title }))} />
@@ -1316,7 +1327,7 @@ export default function App() {
         </Section>
 
         {fixed.w > 0 && (
-          <Section title="Grid" action={<Reset onClick={() => setGrid(DEFAULT_GRID)} />}>
+          <Section title="Grid" summary={`${grid.columns} × ${grid.rows}`} action={<Reset onClick={() => setGrid(DEFAULT_GRID)} />}>
             <Slider label="Columns" value={grid.columns} min={1} max={12} step={1} reset={DEFAULT_GRID.columns} format={(v) => `${v}`} onChange={(v) => setGrid({ ...grid, columns: v })} />
             <Slider label="Side margin" value={grid.side} min={0} max={240} step={1} reset={DEFAULT_GRID.side} format={(v) => `${v} px`} onChange={(v) => setGrid({ ...grid, side: v })} />
             <Slider label="Rows" value={grid.rows} min={1} max={16} step={1} reset={DEFAULT_GRID.rows} format={(v) => `${v}`} onChange={(v) => setGrid({ ...grid, rows: v })} />
@@ -1324,6 +1335,7 @@ export default function App() {
             <Slider label="Gutter" value={grid.gutter} min={0} max={80} step={1} reset={DEFAULT_GRID.gutter} format={(v) => `${v} px`} onChange={(v) => setGrid({ ...grid, gutter: v })} />
           </Section>
         )}
+        </Panel>
       </aside>
 
       <main className="center">
@@ -1362,20 +1374,12 @@ export default function App() {
       </main>
 
       <aside className="panel right">
+        <Panel open={rightOpen} setOpen={setRightOpen}>
         {!hasClay && <p className="panel-note">Plain type is set as the font draws it, so the clay controls and type motion are off. Set a text's Style to Clay to use them.</p>}
         <div className={!hasClay ? 'muted' : undefined}>
-        <Section title="Presets">
-          <div className="chips">
-            {PRESETS.map((pr) => (
-              <button key={pr.id} type="button" className={`chip ${activePreset === pr.id ? 'on' : ''}`} onClick={() => setParams((p) => ({ ...pr.params, seed: p.seed }))}>
-                {pr.label}
-              </button>
-            ))}
-          </div>
-        </Section>
-
         <Section
-          title="Organic"
+          title="Clay"
+          summary={PRESETS.find((pr) => pr.id === activePreset)?.label ?? 'Custom'}
           action={
             // The seed only picks which noise pattern is used, so it is only offered while noise is on.
             <span className="actions">
@@ -1388,6 +1392,13 @@ export default function App() {
             </span>
           }
         >
+          <div className="chips">
+            {PRESETS.map((pr) => (
+              <button key={pr.id} type="button" className={`chip ${activePreset === pr.id ? 'on' : ''}`} onClick={() => setParams((p) => ({ ...pr.params, seed: p.seed }))}>
+                {pr.label}
+              </button>
+            ))}
+          </div>
           {ORGANIC.map((o) => (
             <Slider key={o.key} label={o.label} hint={o.hint} value={params[o.key]} reset={PRESETS[0].params[o.key]} onChange={(v) => setP(o.key, v)} />
           ))}
@@ -1395,6 +1406,7 @@ export default function App() {
 
         <Section
           title="Motion"
+          summary={MOTIONS.find((m) => m.id === motion)?.label}
           action={
             <Reset
               onClick={() => {
@@ -1442,7 +1454,7 @@ export default function App() {
         </Section>
         </div>
         {moving && (
-          <Section title="Playback">
+          <Section title="Playback" pinned>
           {moving && (
             <div className="transport">
               <button type="button" className="btn" onClick={() => setPlaying(!playing)}>
@@ -1477,6 +1489,7 @@ export default function App() {
           )}
           </Section>
         )}
+        </Panel>
       </aside>
     </div>
   )

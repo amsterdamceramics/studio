@@ -20,7 +20,8 @@
 :root {
   --bg: #0a0a0b;
   --panel: #101011;
-  --raised: #19191b;
+  --card: #141416;
+  --raised: #1c1c1f;
   --hover: #222225;
   --line: #1f1f22;
   --line-strong: #2c2c30;
@@ -28,7 +29,7 @@
   --muted: #8b8b90;
   --faint: #5d5d62;
   --acid: #c7ff00;
-  --radius: 7px;
+  --radius: 8px;
   color-scheme: dark;
 }
 
@@ -46,7 +47,7 @@ body,
 body {
   background: var(--bg);
   color: var(--text);
-  font: 400 13px/1.4 'Instrument Sans', system-ui, sans-serif;
+  font: 400 14px/1.45 'Instrument Sans', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   font-variant-numeric: tabular-nums;
 }
@@ -69,8 +70,8 @@ button {
 
 .app {
   display: grid;
-  grid-template-columns: 272px minmax(0, 1fr) 292px;
-  grid-template-rows: 48px minmax(0, 1fr);
+  grid-template-columns: 304px minmax(0, 1fr) 320px;
+  grid-template-rows: 56px minmax(0, 1fr);
   height: 100%;
 }
 
@@ -121,8 +122,8 @@ button {
 .btn,
 .toggle,
 .chip {
-  height: 28px;
-  padding: 0 10px;
+  height: 32px;
+  padding: 0 12px;
   border: 1px solid transparent;
   border-radius: var(--radius);
   background: transparent;
@@ -163,6 +164,11 @@ button {
 
 /* Panels */
 .panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  padding-inline: 8px;
   overflow-y: auto;
   /* Room to scroll the last control clear of anything the host floats over the corner (Netlify's badge). */
   padding-bottom: 72px;
@@ -176,31 +182,83 @@ button {
 .panel.right {
   border-left: 1px solid var(--line);
 }
+/* Each section is a card; closed, it is one row: title, a summary of its settings, a chevron. */
 .section {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  flex: none;
+  gap: 16px;
   padding: 16px;
-  border-bottom: 1px solid var(--line);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+}
+.section:not(.open) {
+  padding-block: 0;
+}
+.section:not(.open):hover {
+  border-color: var(--line-strong);
 }
 .section-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 16px;
+  gap: 16px;
+  min-height: 24px;
 }
 .section-head h2 {
+  flex: none;
   margin: 0;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: -0.005em;
+  color: var(--text);
+}
+.section-toggle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+}
+.section:not(.open) .section-toggle {
+  min-height: 56px;
+}
+.section-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
   color: var(--muted);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chevron {
+  flex: none;
+  margin-left: auto;
+  color: var(--faint);
+  transform: rotate(-90deg);
+  transition: transform 0.15s;
+}
+.section-summary + .chevron {
+  margin-left: 0;
+}
+.section.open .chevron {
+  transform: none;
+}
+.section-toggle:hover .chevron {
+  color: var(--text);
 }
 .link {
   padding: 0;
   border: 0;
   background: none;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
 }
 .link:hover {
@@ -228,8 +286,8 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  min-height: 28px;
+  gap: 16px;
+  min-height: 32px;
 }
 .field-label {
   color: var(--muted);
@@ -246,7 +304,7 @@ button {
   border: 1px solid var(--line);
 }
 .segmented button {
-  height: 24px;
+  height: 28px;
   min-width: 30px;
   padding: 0 8px;
   border: 0;
@@ -267,7 +325,7 @@ button {
 .slider {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 .slider-row {
   display: flex;
@@ -281,8 +339,8 @@ button {
   color: var(--muted);
 }
 .slider-hint {
-  margin-top: -1px;
-  font-size: 11px;
+  margin-top: -2px;
+  font-size: 12px;
   color: var(--faint);
 }
 input[type='range'] {
@@ -345,11 +403,11 @@ input[type='range']:active::-webkit-slider-thumb {
 
 .swatches {
   display: flex;
-  gap: 5px;
+  gap: 8px;
 }
 .swatch {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: 1px solid var(--line-strong);
   border-radius: 50%;
@@ -387,8 +445,8 @@ input[type='range']:active::-webkit-slider-thumb {
 }
 
 .motion-hint {
-  margin: -4px 0 0;
-  font-size: 11px;
+  margin: -8px 0 0;
+  font-size: 12px;
   color: var(--faint);
 }
 .transport {
@@ -448,7 +506,7 @@ input[type='range']:active::-webkit-slider-thumb {
   gap: 20px;
   padding: 0 16px;
   border-top: 1px solid var(--line);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--faint);
 }
 .warn {
@@ -482,9 +540,12 @@ input[type='range']:active::-webkit-slider-thumb {
 /* Mode tabs and photo controls */
 .tabs {
   display: flex;
+  flex: none;
   gap: 4px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--line);
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
 }
 .tabs .chip {
   flex: 1;
@@ -509,7 +570,7 @@ input[type='range']:active::-webkit-slider-thumb {
   color: var(--text);
 }
 .drop small {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--faint);
 }
 .drop input {
@@ -587,8 +648,7 @@ input[type='range']:active::-webkit-slider-thumb {
 
 .panel-note {
   margin: 0;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--line);
+  padding: 8px 8px 0;
   font-size: 12px;
   color: var(--muted);
 }
@@ -605,8 +665,8 @@ input[type='range']:active::-webkit-slider-thumb {
 .option {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 9px 11px;
+  gap: 4px;
+  padding: 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--bg);
@@ -622,7 +682,7 @@ input[type='range']:active::-webkit-slider-thumb {
   color: var(--text);
 }
 .option span {
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.35;
 }
 .option.on {
@@ -632,7 +692,7 @@ input[type='range']:active::-webkit-slider-thumb {
 
 .photo-kind {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--faint);
 }
 
@@ -674,7 +734,7 @@ input[type='range']:active::-webkit-slider-thumb {
 }
 .layer-kind {
   color: var(--faint);
-  font-size: 11px;
+  font-size: 12px;
 }
 .layers + .text-input {
   min-height: 72px;

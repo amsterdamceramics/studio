@@ -1,13 +1,36 @@
-import type { CSSProperties, ReactNode } from 'react'
+import { createContext, useContext, type CSSProperties, type ReactNode } from 'react'
 
-export function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
+/** Which card is open in a side panel. Opening one closes the others, so a panel scans as a short list of headings. */
+const PanelOpen = createContext<{ open: string | null; setOpen: (title: string | null) => void } | null>(null)
+
+export function Panel({ open, setOpen, children }: { open: string | null; setOpen: (title: string | null) => void; children: ReactNode }) {
+  return <PanelOpen.Provider value={{ open, setOpen }}>{children}</PanelOpen.Provider>
+}
+
+/**
+ * A card in a side panel. Closed, it shows its title and a one-line summary of its settings; `pinned`
+ * cards (the playback controls) are always open.
+ */
+export function Section({ title, summary, action, pinned, children }: { title: string; summary?: ReactNode; action?: ReactNode; pinned?: boolean; children: ReactNode }) {
+  const panel = useContext(PanelOpen)
+  const open = pinned || !panel || panel.open === title
   return (
-    <section className="section">
+    <section className={`section ${open ? 'open' : ''}`}>
       <header className="section-head">
-        <h2>{title}</h2>
-        {action}
+        {pinned || !panel ? (
+          <h2>{title}</h2>
+        ) : (
+          <button type="button" className="section-toggle" aria-expanded={open} onClick={() => panel.setOpen(open ? null : title)}>
+            <h2>{title}</h2>
+            {!open && summary !== undefined && <span className="section-summary">{summary}</span>}
+            <svg className="chevron" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        )}
+        {open && action}
       </header>
-      {children}
+      {open && children}
     </section>
   )
 }
