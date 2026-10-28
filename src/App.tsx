@@ -17,6 +17,7 @@ import {
   coverPainter,
   gradientMap,
   loadPhoto,
+  loadVideo,
   TypeSetter,
   download,
   drawToCanvas,
@@ -152,7 +153,13 @@ export default function App() {
   const [restBy, setRestBy] = useState<Partial<Record<Motion, number>>>({})
   const restOf = (m: Motion) => restBy[m] ?? REST[m].start
   const [tab, setTab] = useState<'type' | 'image'>('type')
-  const [photo, setPhoto] = useState<{ canvas: HTMLCanvasElement; name: string } | null>(null)
+  // A photo, or a video: then `canvas` is a still of its first frame and `video` plays underneath.
+  const [photo, setPhoto] = useState<{ canvas: HTMLCanvasElement; name: string; video?: HTMLVideoElement; duration?: number } | null>(null)
+  // The section of a video that plays and loops, in seconds.
+  const [trim, setTrim] = useState({ start: 0, end: 0 })
+  const [keepSound, setKeepSound] = useState(false)
+  // Bumped when a paused video lands on a new frame, so the board redraws with it.
+  const [frameTick, setFrameTick] = useState(0)
   const [gmap, setGmap] = useState<GradientMap>({ enabled: true, shadow: RAMPS[0].shadow, highlight: RAMPS[0].highlight, contrast: 0, brightness: 0 })
   const [place, setPlace] = useState<Placement>({ zoom: 1, x: 0, y: 0 })
   const [dropping, setDropping] = useState(false)
@@ -192,7 +199,8 @@ export default function App() {
   // One moving thing per layout: a photo effect belongs to the full-board layout only.
   const liveEffect: PhotoEffect = crop === 'full' ? effect : 'off'
   const fxOn = !!photo && !!fx && liveEffect !== 'off'
-  const moving = motion !== 'off' || shapeMove !== 'off' || fxOn || crop === 'window'
+  const clip = photo?.video ? Math.max(0.5, trim.end - trim.start) : 0
+  const moving = motion !== 'off' || shapeMove !== 'off' || fxOn || crop === 'window' || clip > 0
   const rest = restOf(motion)
   const shapeRest = restOf(shapeMove)
   const animating = moving && playing && !recording
@@ -218,10 +226,18 @@ export default function App() {
     }
     return { typeCycles: best.n, shapeCycles: best.k, seconds: (base * best.n) / typeSpeed, speed: best.k / best.n }
   })()
-  const { typeCycles, shapeCycles, seconds } = timing
+  // With a video the clip sets the loop, and everything else runs a whole number of times inside it.
+  const shapeBase = windowOn ? WINDOW_SECONDS : (MOTIONS.find((m) => m.id === shapeMove)?.seconds ?? 5)
+  const { typeCycles, shapeCycles, seconds } = clip
+    ? {
+        seconds: clip,
+        typeCycles: motion !== 'off' ? Math.max(1, Math.round((clip * typeSpeed) / (MOTIONS.find((m) => m.id === motion)?.seconds ?? 5))) : 1,
+        shapeCycles: shapeOn ? Math.max(1, Math.round((clip * shapeSpeed) / shapeBase)) : 1,
+      }
+    : timing
   // Alongside type or shape motion the effect has to finish on a whole number of cycles per loop,
   // so it takes the nearest speed that does.
-  const fxAlone = motion === 'off' && !shapeOn
+  const fxAlone = motion === 'off' && !shapeOn && !clip
   const fxCycles = fxAlone ? 1 : Math.max(1, Math.round((seconds * tune.speed) / FX_SECONDS))
   const fxActual = fxAlone ? tune.speed : (fxCycles * FX_SECONDS) / seconds
 
@@ -229,14 +245,31 @@ export default function App() {
     if (!ts || animating || recording) return
     const raf = requestAnimationFrame(() => setOut(render(ts, type, params, motion, moving ? phase : 0, rest, typeCycles)))
     return () => cancelAnimationFrame(raf)
-  }, [ts, type, params, motion, phase, animating, recording, rest, moving, typeCycles])
+  }, [ts, type, params, motion, phase, animating, recording, rest, moving, typeCycles, frameTick])
 
   useEffect(() => {
     if (!ts || !animating) return
     let raf = 0
     const origin = performance.now() - phaseRef.current * seconds * 1000
+    const video = photo?.video
+    if (video) {
+      // The video is the clock: it plays natively, and the loop phase is read from where it is.
+      video.currentTime = trim.start + phaseRef.current * clip
+      void video.play().catch(() => {})
+    }
     const loop = (now: number) => {
-      const p = (((now - origin) / 1000 / seconds) % 1 + 1) % 1
+      let p = (((now - origin) / 1000 / seconds) % 1 + 1) % 1
+      if (video) {
+        // Wrap at the trim. A file can also end a little before its stated length, so an ended or
+        // stalled clip is sent back to the start and played again.
+        if (video.ended || video.currentTime >= trim.start + clip - 0.03 || video.currentTime < trim.start - 0.05) {
+          video.currentTime = trim.start
+          void video.play().catch(() => {})
+        } else if (video.paused) {
+          void video.play().catch(() => {})
+        }
+        p = Math.min(0.9999, Math.max(0, (video.currentTime - trim.start) / clip))
+      }
       phaseRef.current = p
       setOut(render(ts, type, params, motion, p, rest, typeCycles))
       raf = requestAnimationFrame(loop)
@@ -244,13 +277,27 @@ export default function App() {
     raf = requestAnimationFrame(loop)
     return () => {
       cancelAnimationFrame(raf)
+      video?.pause()
       setPhase(phaseRef.current)
     }
-  }, [ts, type, params, motion, animating, seconds, rest, typeCycles])
+  }, [ts, type, params, motion, animating, seconds, rest, typeCycles, photo, trim.start, clip])
+
+  // Paused on a video: show the frame at the scrubbed position once the browser has it.
+  useEffect(() => {
+    const video = photo?.video
+    if (!video || animating || recording) return
+    video.pause()
+    const target = trim.start + phase * clip
+    if (Math.abs(video.currentTime - target) < 0.01) return
+    const landed = () => setFrameTick((n) => n + 1)
+    video.addEventListener('seeked', landed, { once: true })
+    video.currentTime = target
+    return () => video.removeEventListener('seeked', landed)
+  }, [photo, animating, recording, phase, trim.start, clip])
 
   // Undo. Everything that makes up the artwork is gathered into one snapshot; a change is committed
   // to history once it has settled for a moment, so dragging a slider is one step, not hundreds.
-  const snap = { type, params, fill, background, transparent, motion: motionSet, typeSpeed, restBy, photo, gmap, place, crop, blob, windowShape, hideType, shapeFill, shapeMotion, shapeSpeed, effect, fxTune, fxSeed, swapTo }
+  const snap = { type, params, fill, background, transparent, motion: motionSet, typeSpeed, restBy, photo, trim, gmap, place, crop, blob, windowShape, hideType, shapeFill, shapeMotion, shapeSpeed, effect, fxTune, fxSeed, swapTo }
   type Snap = typeof snap
   const sameAs = (a: Snap, b: Snap) => (Object.keys(a) as (keyof Snap)[]).every((k) => a[k] === b[k])
   const history = useRef<{ committed: Snap; undo: Snap[]; redo: Snap[] } | null>(null)
@@ -284,6 +331,7 @@ export default function App() {
     setTypeSpeed(to.typeSpeed)
     setRestBy(to.restBy)
     setPhoto(to.photo)
+    setTrim(to.trim)
     setGmap(to.gmap)
     setPlace(to.place)
     setCrop(to.crop)
@@ -395,8 +443,11 @@ export default function App() {
             ctx.fillRect(0, 0, cw, ch)
           }
         : fx
-        ? (ctx: CanvasRenderingContext2D, cw: number, ch: number) =>
-            ctx.drawImage(fx.render({ width: cw, height: ch, place, map: gmap, effect: liveEffect, phase: (o.phase * fxCycles) % 1, strength: tune.strength, swapTo: to, seed: fxSeed }), 0, 0, cw, ch)
+        ? (ctx: CanvasRenderingContext2D, cw: number, ch: number) => {
+            // A video hands the renderer whatever frame it is showing right now.
+            if (photo.video) fx.setFrame(photo.video)
+            return ctx.drawImage(fx.render({ width: cw, height: ch, place, map: gmap, effect: liveEffect, phase: (o.phase * fxCycles) % 1, strength: tune.strength, swapTo: to, seed: fxSeed }), 0, 0, cw, ch)
+          }
         : treated
           ? coverPainter(treated, place)
           : null
@@ -414,8 +465,26 @@ export default function App() {
 
   const addPhoto = async (file: File | undefined) => {
     if (!file) return
-    if (!file.type.startsWith('image/')) return flash('That file is not an image')
+    if (file.type.startsWith('video/') || /\.(mov|mp4|m4v|webm)$/i.test(file.name)) {
+      if (!fx) return flash('Video needs WebGL, which this browser does not have')
+      try {
+        photo?.video?.pause()
+        const { video, still, duration } = await loadVideo(file)
+        fx.setPhoto(still)
+        setPhoto({ canvas: still, name: file.name, video, duration })
+        setTrim({ start: 0, end: duration })
+        setPlace({ zoom: 1, x: 0, y: 0 })
+        phaseRef.current = 0
+        setPhase(0)
+        setPlaying(true)
+      } catch (e) {
+        flash((e as Error).message)
+      }
+      return
+    }
+    if (!file.type.startsWith('image/')) return flash('That file is not a photo or a video')
     try {
+      photo?.video?.pause()
       const canvas = await loadPhoto(file)
       // Hand the photo to the renderer before the first frame asks for it.
       fx?.setPhoto(canvas)
@@ -455,6 +524,7 @@ export default function App() {
     }
   }
 
+  const audioGraph = useRef<{ audio: AudioContext; dest: MediaStreamAudioDestinationNode; video: HTMLVideoElement } | null>(null)
   const record = async () => {
     if (!ts || !moving || recording) return
     const mime = ['video/mp4;codecs=avc1', 'video/webm;codecs=vp9', 'video/webm'].find((m) => MediaRecorder.isTypeSupported(m))
@@ -468,10 +538,35 @@ export default function App() {
     const ctx = canvas.getContext('2d')!
     const density = canvas.width / Math.round(first.frame.w * first.frame.scale)
     const count = Number(loops)
-    const rec = new MediaRecorder(canvas.captureStream(60), { mimeType: mime, videoBitsPerSecond: 12_000_000 })
+    const video = photo?.video
+    const stream = canvas.captureStream(60)
+    if (video && keepSound) {
+      // The clip's sound is routed into the recording only, so nothing plays out loud while it records.
+      const graph = (audioGraph.current ??= (() => {
+        const audio = new AudioContext()
+        const dest = audio.createMediaStreamDestination()
+        audio.createMediaElementSource(video).connect(dest)
+        return { audio, dest, video }
+      })())
+      if (graph.video === video) {
+        void graph.audio.resume()
+        video.muted = false
+        for (const t of graph.dest.stream.getAudioTracks()) stream.addTrack(t)
+      }
+    }
+    if (video) {
+      video.currentTime = trim.start
+      await new Promise((r) => video.addEventListener('seeked', r, { once: true }))
+      void video.play().catch(() => {})
+    }
+    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 12_000_000 })
     const chunks: Blob[] = []
     rec.ondataavailable = (e) => chunks.push(e.data)
     rec.onstop = () => {
+      if (video) {
+        video.pause()
+        video.muted = true
+      }
       download(`${name}-${motion !== 'off' ? motion : windowOn ? windowShape.style : shapeMove !== 'off' ? shapeMove : effect}.${mime.includes('mp4') ? 'mp4' : 'webm'}`, new Blob(chunks, { type: mime }))
       setRecording(false)
       flash('Video saved')
@@ -479,8 +574,17 @@ export default function App() {
     const start = performance.now()
     const step = (now: number) => {
       const t = (now - start) / 1000 / seconds
+      let p = t >= count ? 0.9999 : t % 1
+      if (video) {
+        // The clip keeps the time: wrap it at the trim, and read the phase from where it is.
+        if (video.ended || video.currentTime >= trim.start + clip - 0.03) {
+          video.currentTime = trim.start
+          void video.play().catch(() => {})
+        }
+        p = t >= count ? 0.9999 : Math.min(0.9999, Math.max(0, (video.currentTime - trim.start) / clip))
+      }
       // The last frame sits just short of the seam, so the file itself also repeats cleanly.
-      const o = render(ts, type, params, motion, t >= count ? 0.9999 : t % 1, rest, typeCycles)
+      const o = render(ts, type, params, motion, p, rest, typeCycles)
       drawToCanvas(ctx, o.loops, o.frame, ink, background, backdropFor(o, density), typeClipFor(o))
       setOut(o)
       if (t < count) requestAnimationFrame(step)
@@ -540,7 +644,10 @@ export default function App() {
             <Section title="Photo">
               {photo ? (
                 <div className="photo-row">
-                  <span className="photo-name" title={photo.name}>{photo.name}</span>
+                  <span className="photo-name" title={photo.name}>
+                    {photo.name}
+                    {photo.video && <small className="photo-kind">Video · {secs(photo.duration ?? 0)} s</small>}
+                  </span>
                   <button type="button" className="btn" onClick={() => setPhoto(null)}>Remove</button>
                 </div>
               ) : null}
@@ -559,15 +666,44 @@ export default function App() {
               >
                 <input
                   type="file"
-                  accept="image/*"
+                  accept="image/*,video/*,.mov,.mp4,.m4v,.webm"
                   onChange={(e) => {
                     addPhoto(e.target.files?.[0])
                     e.target.value = ''
                   }}
                 />
-                <span>{photo ? 'Replace photo' : 'Choose a photo or drop one here'}</span>
+                <span>{photo ? 'Replace photo or video' : 'Choose a photo or video, or drop one here'}</span>
                 <small>It stays in this browser and is not uploaded</small>
               </label>
+              {photo?.video && (
+                <>
+                  <Slider
+                    label="Start"
+                    value={trim.start}
+                    min={0}
+                    max={photo.duration ?? 0}
+                    step={0.1}
+                    reset={0}
+                    format={(v) => `${v.toFixed(1)} s`}
+                    onChange={(v) => setTrim({ start: Math.min(v, trim.end - 0.5), end: trim.end })}
+                  />
+                  <Slider
+                    label="End"
+                    hint={`The loop is ${secs(clip)} s`}
+                    value={trim.end}
+                    min={0}
+                    max={photo.duration ?? 0}
+                    step={0.1}
+                    reset={photo.duration ?? 0}
+                    format={(v) => `${v.toFixed(1)} s`}
+                    onChange={(v) => setTrim({ start: trim.start, end: Math.max(v, trim.start + 0.5) })}
+                  />
+                  <label className="check">
+                    <input type="checkbox" checked={keepSound} onChange={(e) => setKeepSound(e.target.checked)} />
+                    Keep the sound in exported video
+                  </label>
+                </>
+              )}
             </Section>
 
             {photo && (

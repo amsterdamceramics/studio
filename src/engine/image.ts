@@ -22,6 +22,38 @@ export interface Placement {
 
 const MAX_SIDE = 2400
 
+/**
+ * Open a video file for use as the backdrop. Resolves once the first frame can be drawn; fails with
+ * a readable message when the browser cannot decode the file (for example HEVC outside Safari).
+ */
+export function loadVideo(file: File): Promise<{ video: HTMLVideoElement; still: HTMLCanvasElement; duration: number }> {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement('video')
+    video.muted = true
+    video.playsInline = true
+    video.preload = 'auto'
+    video.crossOrigin = 'anonymous'
+    const fail = () => reject(new Error('This browser cannot play that video. Try an MP4, or set the iPhone camera to Most Compatible.'))
+    const timer = setTimeout(fail, 15000)
+    video.onerror = () => {
+      clearTimeout(timer)
+      fail()
+    }
+    video.onloadeddata = () => {
+      clearTimeout(timer)
+      if (!video.videoWidth || !Number.isFinite(video.duration)) return fail()
+      // A still of the first frame stands in wherever a picture is needed before playback starts.
+      const k = Math.min(1, MAX_SIDE / Math.max(video.videoWidth, video.videoHeight))
+      const still = document.createElement('canvas')
+      still.width = Math.round(video.videoWidth * k)
+      still.height = Math.round(video.videoHeight * k)
+      still.getContext('2d')!.drawImage(video, 0, 0, still.width, still.height)
+      resolve({ video, still, duration: video.duration })
+    }
+    video.src = URL.createObjectURL(file)
+  })
+}
+
 /** Decode a file to a canvas, capped so every later pass stays quick. */
 export async function loadPhoto(file: File): Promise<HTMLCanvasElement> {
   const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })

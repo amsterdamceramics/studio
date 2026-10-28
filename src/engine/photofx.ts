@@ -313,8 +313,23 @@ export class PhotoFx {
 
   /** Upload a photo, and the two blurred versions of its tones the effects lean on. */
   setPhoto(photo: HTMLCanvasElement) {
+    this.upload(photo, photo.width, photo.height, 384)
+  }
+
+  /**
+   * Upload the current frame of a playing video. Called once per drawn frame; the blurred tones
+   * are worked out from a smaller copy than for a still, so it stays cheap at video rates.
+   */
+  setFrame(video: HTMLVideoElement) {
+    if (!video.videoWidth) return
+    this.upload(video, video.videoWidth, video.videoHeight, 224)
+  }
+
+  private small: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null = null
+
+  private upload(photo: HTMLCanvasElement | HTMLVideoElement, pw: number, ph: number, blurSide: number) {
     const gl = this.gl
-    this.size = { w: photo.width, h: photo.height }
+    this.size = { w: pw, h: ph }
     gl.activeTexture(gl.TEXTURE0)
     gl.bindTexture(gl.TEXTURE_2D, this.photo)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, photo)
@@ -325,13 +340,18 @@ export class PhotoFx {
     }
 
     // The blurred tones are smooth by nature, so a small copy is enough and costs almost nothing.
-    const k = 384 / Math.max(photo.width, photo.height)
-    const w = Math.max(8, Math.round(photo.width * k))
-    const h = Math.max(8, Math.round(photo.height * k))
-    const small = document.createElement('canvas')
-    small.width = w
-    small.height = h
-    const ctx = small.getContext('2d', { willReadFrequently: true })!
+    const k = blurSide / Math.max(pw, ph)
+    const w = Math.max(8, Math.round(pw * k))
+    const h = Math.max(8, Math.round(ph * k))
+    if (!this.small) {
+      const canvas = document.createElement('canvas')
+      this.small = { canvas, ctx: canvas.getContext('2d', { willReadFrequently: true })! }
+    }
+    const { canvas: small, ctx } = this.small
+    if (small.width !== w || small.height !== h) {
+      small.width = w
+      small.height = h
+    }
     ctx.imageSmoothingQuality = 'high'
     ctx.drawImage(photo, 0, 0, w, h)
     const d = ctx.getImageData(0, 0, w, h).data

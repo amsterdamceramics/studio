@@ -629,3 +629,9 @@ input[type='range']:active::-webkit-slider-thumb {
   border-color: var(--text);
   background: var(--raised);
 }
+
+.photo-kind {
+  display: block;
+  font-size: 11px;
+  color: var(--faint);
+}
