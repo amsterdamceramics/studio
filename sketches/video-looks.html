@@ -190,6 +190,11 @@
           <input id="cut" type="range" min="0.15" max="0.85" step="0.01" value="0.5" aria-label="Cut" />
         </div>
         <div class="group">
+          <span>Tones</span>
+          <input id="tones" type="range" min="1" max="5" step="1" value="1" aria-label="Tones" />
+          <output id="tonesOut">1</output>
+        </div>
+        <div class="group">
           <button id="flip" type="button" aria-pressed="false">Light subject</button>
           <button id="play" type="button" aria-pressed="false">Pause</button>
         </div>
@@ -197,7 +202,7 @@
 
       <div class="grid">
         <figure><canvas id="c0" width="360" height="450"></canvas><figcaption><i>0</i><b>Original</b><p>The clip as it comes in, for reference.</p></figcaption></figure>
-        <figure><canvas id="c1" width="360" height="450"></canvas><figcaption><i>1</i><b>Clay cut</b><p>Blurred, then cut hard: the background clips to the ground and the subject becomes one soft mass of ink, with a darker core where it is densest.</p></figcaption></figure>
+        <figure><canvas id="c1" width="360" height="450"></canvas><figcaption><i>1</i><b>Clay cut</b><p>Blurred, then cut hard: the background clips to the ground and the subject becomes one soft mass of ink, with a darker core where it is densest. Raise Tones to bring the face back.</p></figcaption></figure>
         <figure><canvas id="c2" width="360" height="450"></canvas><figcaption><i>2</i><b>Clay cut with trails</b><p>The same cut, but where the subject has been lingers and fades, so movement leaves a soft smear behind it.</p></figcaption></figure>
         <figure><canvas id="c3" width="360" height="450"></canvas><figcaption><i>3</i><b>Three-colour melt</b><p>Blurred much further and mapped through three colours: the ground for the light, acid for the middle, violet for the darkest. Almost abstract, the subject read only as moving colour.</p></figcaption></figure>
       </div>
@@ -284,6 +289,8 @@
       }
       const softIn = document.getElementById('soft')
       const cutIn = document.getElementById('cut')
+      const tonesIn = document.getElementById('tones')
+      tonesIn.oninput = () => (document.getElementById('tonesOut').textContent = tonesIn.value)
 
       // One small canvas per blur strength; the browser's own blur filter does the heavy lifting.
       const work = document.createElement('canvas')
@@ -335,14 +342,21 @@
       const ctxs = [0, 1, 2, 3].map((i) => document.getElementById('c' + i).getContext('2d'))
       const outs = ctxs.map((c) => c.createImageData(W, H))
 
+      // One cut makes a single flat mass. More tones cut the same field at several levels, each with
+      // the same soft edge, so eyes, lips and shadows come back as stepped clay shapes between ground and ink.
       function paintCut(out, field) {
         const c = Number(cutIn.value)
+        const T = Number(tonesIn.value)
+        const cuts = []
+        for (let j = 0; j < T; j++) cuts.push(T === 1 ? c : c + (j / (T - 1) - 0.5) * 0.5)
         const o = out.data
         for (let i = 0; i < N; i++) {
           const f = field[i]
-          const t = step(c - 0.035, c + 0.035, f)
-          // The densest part of the subject gets a deeper tone of the same ink, like the reference's core.
-          const core = step(c + 0.22, c + 0.3, f) * 0.28
+          let t = 0
+          for (const k of cuts) t += step(k - 0.03, k + 0.03, f)
+          t /= T
+          // With a single cut, the densest part gets a deeper tone of the same ink, like the reference's core.
+          const core = T === 1 ? step(c + 0.22, c + 0.3, f) * 0.28 : 0
           for (let k = 0; k < 3; k++) o[i * 4 + k] = mix(ground[k], ink[k] * (1 - core), t)
           o[i * 4 + 3] = 255
         }
@@ -356,7 +370,7 @@
           ctxs[0].putImageData(outs[0], 0, 0)
 
           // 1 and 2: the type's recipe on the footage, blur then cut.
-          const clay = tones(frame(2 + s * 14), 'clay')
+          const clay = tones(frame(0.5 + s * 14), 'clay')
           paintCut(outs[1], clay)
           ctxs[1].putImageData(outs[1], 0, 0)
 
