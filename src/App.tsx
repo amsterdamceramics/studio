@@ -999,6 +999,41 @@ export default function App() {
             </label>
           </div>
         </Section>
+        <Section
+          title="Board"
+          summary={fixed.w ? `${BOARDS.find((b) => b.id === type.board)?.label} · ${grid.columns} × ${grid.rows} grid` : 'Fit'}
+        >
+          <div className="field">
+            <span className="field-label">Size</span>
+            <Segmented label="Board size" value={type.board} onChange={(v) => setT('board', v)} options={BOARDS.map((b) => ({ id: b.id, label: b.label, title: b.title }))} />
+          </div>
+          <div className="field">
+            <span className="field-label">Ground</span>
+            <Swatches value={background} onChange={setBackground} label="Background colour" />
+          </div>
+          <label className="check">
+            <input type="checkbox" checked={transparent} onChange={(e) => setTransparent(e.target.checked)} />
+            Export without background
+          </label>
+          {fixed.w > 0 && (
+            <>
+              <div className="subhead">
+                <h3>Grid</h3>
+                <Reset onClick={() => setGrid(DEFAULT_GRID)} />
+              </div>
+              <label className="check" title="⇧G">
+                <input type="checkbox" checked={guides.grid} onChange={(e) => setGuides({ ...guides, grid: e.target.checked })} />
+                Show on the board
+              </label>
+              <Slider label="Columns" value={grid.columns} min={1} max={12} step={1} reset={DEFAULT_GRID.columns} format={(v) => `${v}`} onChange={(v) => setGrid({ ...grid, columns: v })} />
+              <Slider label="Side margin" value={grid.side} min={0} max={240} step={1} reset={DEFAULT_GRID.side} format={(v) => `${v} px`} onChange={(v) => setGrid({ ...grid, side: v })} />
+              <Slider label="Rows" value={grid.rows} min={1} max={16} step={1} reset={DEFAULT_GRID.rows} format={(v) => `${v}`} onChange={(v) => setGrid({ ...grid, rows: v })} />
+              <Slider label="Top and bottom margin" value={grid.top} min={0} max={400} step={1} reset={DEFAULT_GRID.top} format={(v) => `${v} px`} onChange={(v) => setGrid({ ...grid, top: v })} />
+              <Slider label="Gutter" value={grid.gutter} min={0} max={80} step={1} reset={DEFAULT_GRID.gutter} format={(v) => `${v} px`} onChange={(v) => setGrid({ ...grid, gutter: v })} />
+            </>
+          )}
+        </Section>
+
         <div className="tabs" role="tablist" aria-label="Layer to edit">
           <button type="button" role="tab" aria-selected={tab === 'type'} className={`chip ${tab === 'type' ? 'on' : ''}`} onClick={() => {
             setTab('type')
@@ -1491,30 +1526,6 @@ export default function App() {
         </>
         )}
 
-        <Section title="Canvas" summary={BOARDS.find((b) => b.id === type.board)?.label}>
-          <div className="field">
-            <span className="field-label">Board</span>
-            <Segmented label="Board size" value={type.board} onChange={(v) => setT('board', v)} options={BOARDS.map((b) => ({ id: b.id, label: b.label, title: b.title }))} />
-          </div>
-          <div className="field">
-            <span className="field-label">Ground</span>
-            <Swatches value={background} onChange={setBackground} label="Background colour" />
-          </div>
-          <label className="check">
-            <input type="checkbox" checked={transparent} onChange={(e) => setTransparent(e.target.checked)} />
-            Export without background
-          </label>
-        </Section>
-
-        {fixed.w > 0 && (
-          <Section title="Grid" summary={`${grid.columns} × ${grid.rows}`} action={<Reset onClick={() => setGrid(DEFAULT_GRID)} />}>
-            <Slider label="Columns" value={grid.columns} min={1} max={12} step={1} reset={DEFAULT_GRID.columns} format={(v) => `${v}`} onChange={(v) => setGrid({ ...grid, columns: v })} />
-            <Slider label="Side margin" value={grid.side} min={0} max={240} step={1} reset={DEFAULT_GRID.side} format={(v) => `${v} px`} onChange={(v) => setGrid({ ...grid, side: v })} />
-            <Slider label="Rows" value={grid.rows} min={1} max={16} step={1} reset={DEFAULT_GRID.rows} format={(v) => `${v}`} onChange={(v) => setGrid({ ...grid, rows: v })} />
-            <Slider label="Top and bottom margin" value={grid.top} min={0} max={400} step={1} reset={DEFAULT_GRID.top} format={(v) => `${v} px`} onChange={(v) => setGrid({ ...grid, top: v })} />
-            <Slider label="Gutter" value={grid.gutter} min={0} max={80} step={1} reset={DEFAULT_GRID.gutter} format={(v) => `${v} px`} onChange={(v) => setGrid({ ...grid, gutter: v })} />
-          </Section>
-        )}
         </Panel>
       </aside>
       )}
