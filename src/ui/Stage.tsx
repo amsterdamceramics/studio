@@ -46,8 +46,8 @@ interface Props {
   snaps: { x: number[]; y: number[] }
   /** Column and row bands to draw, when the grid is shown. */
   grid: { cols: [number, number][]; rows: [number, number][] } | null
-  /** The reel's feed crop and the room Instagram's buttons take, as shares of the board. */
-  safe: { top: number; bottom: number; ui: { top: number; bottom: number; side: number } } | null
+  /** Labelled frames for where a reel is cropped or covered elsewhere on Instagram, in board pixels. */
+  safe: { id: string; label: string; x: number; y: number; w: number; h: number; dash: 'long' | 'dot' | 'solid' }[] | null
 }
 
 /** How close, in screen pixels, an edge has to come before it snaps. */
@@ -115,6 +115,19 @@ export function Stage({ paints, textShown, loops, source, frame, background, bac
   const light = backdrop && first ? !isLight(first) : isLight(background)
   const ink = light ? '#000' : '#fff'
 
+  // Each frame's label sits inside its top-left corner; frames that start close together have their
+  // labels stacked, top frame first, so no two overlap.
+  const labelY = useMemo(() => {
+    if (!safe) return []
+    const out: number[] = []
+    let below = -Infinity
+    for (const i of safe.map((_, i) => i).sort((a, b) => safe[a].y - safe[b].y)) {
+      out[i] = Math.max(safe[i].y + 8 * px, below + 4 * px)
+      below = out[i] + 18 * px
+    }
+    return out
+  }, [safe, px])
+
   const drag = useRef<{ id: number; px: number; py: number; box: Box; moved: boolean } | null>(null)
   const [snapped, setSnapped] = useState<{ x: number | null; y: number | null }>({ x: null, y: null })
   const down = (e: PointerEvent<SVGRectElement>, box: Box) => {
@@ -147,7 +160,6 @@ export function Stage({ paints, textShown, loops, source, frame, background, bac
     setSnapped({ x: null, y: null })
   }
 
-  const ui = safe?.ui
   return (
     <div
       ref={host}
@@ -198,14 +210,21 @@ export function Stage({ paints, textShown, loops, source, frame, background, bac
               ))}
             </g>
           )}
-          {safe && ui && (
+          {safe && (
             <g aria-hidden="true" pointerEvents="none">
-              {/* Instagram's own buttons and caption sit over these parts of a reel. */}
-              <rect x={0} y={0} width={w} height={h * ui.top} fill="#2f7bff" fillOpacity={0.14} />
-              <rect x={0} y={h * (1 - ui.bottom)} width={w} height={h * ui.bottom} fill="#2f7bff" fillOpacity={0.14} />
-              <rect x={w * (1 - ui.side)} y={h * ui.top} width={w * ui.side} height={h * (1 - ui.top - ui.bottom)} fill="#2f7bff" fillOpacity={0.14} />
-              {/* The 4:5 part the feed shows. */}
-              <rect x={px / 2} y={safe.top} width={w - px} height={safe.bottom - safe.top} fill="none" stroke={ink} strokeWidth={px * 1.5} strokeDasharray={`${6 * px} ${4 * px}`} />
+              {safe.map((f, i) => {
+                const dash = f.dash === 'long' ? `${8 * px} ${5 * px}` : f.dash === 'dot' ? `${1.5 * px} ${4 * px}` : undefined
+                const ly = labelY[i]
+                return (
+                  <g key={f.id}>
+                    <rect x={f.x + px} y={f.y} width={f.w - px * 2} height={f.h} fill="none" stroke={ink} strokeOpacity={0.85} strokeWidth={px * 1.5} strokeDasharray={dash} strokeLinecap="round" />
+                    <rect x={f.x + 8 * px} y={ly} width={(f.label.length * 6.6 + 12) * px} height={18 * px} rx={4 * px} fill={light ? '#fff' : '#000'} fillOpacity={0.75} />
+                    <text x={f.x + 14 * px} y={ly + 13 * px} fontSize={11 * px} fontWeight={600} fill={ink}>
+                      {f.label}
+                    </text>
+                  </g>
+                )
+              })}
             </g>
           )}
 

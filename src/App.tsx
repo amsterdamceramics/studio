@@ -88,9 +88,17 @@ interface Grid {
 }
 const DEFAULT_GRID: Grid = { columns: 5, side: 80, rows: 10, top: 124, gutter: 20 }
 
-/** Where a 9:16 reel is cropped to 4:5 in the feed, and the room Instagram's own buttons and caption take. */
+/**
+ * What a 9:16 reel looks like elsewhere on Instagram, on the 1080 × 1920 board: the 4:5 part the feed
+ * shows, the 3:4 part the profile grid shows, and the part left clear of the reel's own buttons and
+ * caption (top 14%, bottom 35%, right 6%). Each is drawn as a labelled frame and snapped to.
+ */
 const FEED_CROP = { top: 285, bottom: 1635, inset: 124 }
-const REELS_UI = { top: 0.14, bottom: 0.35, side: 0.06 }
+const SAFE_FRAMES = [
+  { id: 'feed', label: 'Feed 4:5', x: 0, y: 285, w: 1080, h: 1350, dash: 'long' as const },
+  { id: 'grid', label: 'Profile grid 3:4', x: 0, y: 240, w: 1080, h: 1440, dash: 'dot' as const },
+  { id: 'clear', label: 'Clear of Instagram buttons', x: 0, y: 269, w: 1015, h: 979, dash: 'solid' as const },
+]
 
 function gridLines(w: number, h: number, g: Grid) {
   const cw = (w - g.side * 2 - g.gutter * (g.columns - 1)) / g.columns
@@ -872,7 +880,13 @@ export default function App() {
       x.push(...lines.cols.flat())
       y.push(...lines.rows.flat())
     }
-    if (guides.safe && story) y.push(FEED_CROP.top, FEED_CROP.bottom, FEED_CROP.top + FEED_CROP.inset, FEED_CROP.bottom - FEED_CROP.inset)
+    if (guides.safe && story) {
+      y.push(FEED_CROP.top + FEED_CROP.inset, FEED_CROP.bottom - FEED_CROP.inset)
+      for (const f of SAFE_FRAMES) {
+        y.push(f.y, f.y + f.h)
+        if (f.x + f.w < fixed.w) x.push(f.x + f.w)
+      }
+    }
     return { x, y }
   }, [fixed.w, fixed.h, lines, guides, story])
   const setP = (key: keyof OrganicParams, v: number) => setParams((p) => ({ ...p, [key]: v }))
@@ -1507,7 +1521,7 @@ export default function App() {
             onMove={moveLayer}
             snaps={snaps}
             grid={guides.grid ? lines : null}
-            safe={guides.safe && story ? { top: FEED_CROP.top, bottom: FEED_CROP.bottom, ui: REELS_UI } : null}
+            safe={guides.safe && story ? SAFE_FRAMES : null}
           />
         ) : (
           <div className="empty">Loading Instrument Sans</div>
