@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Video looks</title>
+    <style>
+      @font-face {
+        font-family: 'Instrument Sans';
+        src: url('/fonts/InstrumentSans-Regular.ttf') format('truetype');
+        font-weight: 400;
+      }
+      @font-face {
+        font-family: 'Instrument Sans';
+        src: url('/fonts/InstrumentSans-SemiBold.ttf') format('truetype');
+        font-weight: 600;
+      }
+      @font-face {
+        font-family: 'Instrument Sans';
+        src: url('/fonts/InstrumentSans-Bold.ttf') format('truetype');
+        font-weight: 700;
+      }
+      :root {
+        --bg: #0a0a0b;
+        --panel: #101011;
+        --line: #1f1f22;
+        --line-strong: #2c2c30;
+        --text: #ededee;
+        --muted: #8b8b90;
+        --faint: #5d5d62;
+        --acid: #c7ff00;
+        color-scheme: dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 400 14px/1.45 'Instrument Sans', system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      main {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 40px 24px 80px;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 28px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+      }
+      .lede {
+        max-width: 62ch;
+        margin: 0 0 28px;
+        color: var(--muted);
+      }
+      .bar {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 20px;
+        margin: 0 -24px 28px;
+        padding: 12px 24px;
+        background: color-mix(in srgb, var(--bg) 92%, transparent);
+        border-block: 1px solid var(--line);
+        backdrop-filter: blur(8px);
+      }
+      .group {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .group > span {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      button,
+      .file {
+        height: 30px;
+        padding: 0 12px;
+        border: 1px solid var(--line-strong);
+        border-radius: 7px;
+        background: var(--panel);
+        color: var(--muted);
+        font: inherit;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      button:hover,
+      .file:hover {
+        color: var(--text);
+      }
+      button[aria-pressed='true'] {
+        background: var(--text);
+        border-color: var(--text);
+        color: #0a0a0b;
+      }
+      .file {
+        display: inline-flex;
+        align-items: center;
+      }
+      .file input {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+      }
+      input[type='range'] {
+        width: 120px;
+        accent-color: var(--acid);
+      }
+      h2 {
+        margin: 44px 0 6px;
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      h2:first-child {
+        margin-top: 0;
+      }
+      .sub {
+        margin: 0 0 20px;
+        color: var(--muted);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 28px 24px;
+      }
+      figure {
+        margin: 0;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: auto;
+        border-radius: 4px;
+        background: var(--panel);
+      }
+      figcaption {
+        padding-top: 12px;
+      }
+      figcaption b {
+        display: block;
+        font-weight: 600;
+        font-size: 15px;
+      }
+      figcaption i {
+        font-style: normal;
+        color: var(--acid);
+        font-size: 12px;
+      }
+      figcaption p {
+        margin: 4px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .note-motion {
+          display: block;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Video looks</h1>
+      <p class="lede">
+        Three ways to treat a video so it stays readable but turns into clay: the footage is pushed until the background melts into the ground and only the moving subject is left. Drop a video anywhere on the page to try your own. Low-resolution studies, separate from the tool.
+      </p>
+
+      <div class="bar">
+        <div class="group">
+          <label class="file"><input id="file" type="file" accept="video/*,.mov,.mp4,.m4v,.webm" />Try your own video</label>
+        </div>
+        <div class="group" id="inks"><span>Ink</span></div>
+        <div class="group" id="grounds"><span>Ground</span></div>
+        <div class="group">
+          <span>Softness</span>
+          <input id="soft" type="range" min="0" max="1" step="0.01" value="0.5" aria-label="Softness" />
+        </div>
+        <div class="group">
+          <span>Cut</span>
+          <input id="cut" type="range" min="0.15" max="0.85" step="0.01" value="0.5" aria-label="Cut" />
+        </div>
+        <div class="group">
+          <button id="flip" type="button" aria-pressed="false">Light subject</button>
+          <button id="play" type="button" aria-pressed="false">Pause</button>
+        </div>
+      </div>
+
+      <div class="grid">
+        <figure><canvas id="c0" width="360" height="450"></canvas><figcaption><i>0</i><b>Original</b><p>The clip as it comes in, for reference.</p></figcaption></figure>
+        <figure><canvas id="c1" width="360" height="450"></canvas><figcaption><i>1</i><b>Clay cut</b><p>Blurred, then cut hard: the background clips to the ground and the subject becomes one soft mass of ink, with a darker core where it is densest.</p></figcaption></figure>
+        <figure><canvas id="c2" width="360" height="450"></canvas><figcaption><i>2</i><b>Clay cut with trails</b><p>The same cut, but where the subject has been lingers and fades, so movement leaves a soft smear behind it.</p></figcaption></figure>
+        <figure><canvas id="c3" width="360" height="450"></canvas><figcaption><i>3</i><b>Three-colour melt</b><p>Blurred much further and mapped through three colours: the ground for the light, acid for the middle, violet for the darkest. Almost abstract, the subject read only as moving colour.</p></figcaption></figure>
+      </div>
+    </main>
+
+    <script>
+      const W = 360
+      const H = 450
+      const N = W * H
+
+      const INKS = [
+        { id: 'Violet', rgb: [150, 143, 193] },
+        { id: 'Clay', rgb: [180, 164, 138] },
+        { id: 'Acid', rgb: [199, 255, 0] },
+        { id: 'Black', rgb: [0, 0, 0] },
+      ]
+      const GROUNDS = [
+        { id: 'White', rgb: [251, 250, 252] },
+        { id: 'Clay', rgb: [180, 164, 138] },
+        { id: 'Violet', rgb: [150, 143, 193] },
+        { id: 'Acid', rgb: [199, 255, 0] },
+        { id: 'Black', rgb: [0, 0, 0] },
+      ]
+      const VIOLET = [150, 143, 193]
+      const ACID = [199, 255, 0]
+      let ink = INKS[0].rgb
+      let ground = GROUNDS[0].rgb
+      let lightSubject = false
+
+      const clamp = (v) => (v < 0 ? 0 : v > 1 ? 1 : v)
+      const step = (e0, e1, v) => {
+        const t = clamp((v - e0) / (e1 - e0))
+        return t * t * (3 - 2 * t)
+      }
+      const mix = (a, b, t) => a + (b - a) * t
+
+      function buttons(id, list, set, first) {
+        const g = document.getElementById(id)
+        for (const item of list) {
+          const b = document.createElement('button')
+          b.type = 'button'
+          b.textContent = item.id
+          b.setAttribute('aria-pressed', String(item === first))
+          b.onclick = () => {
+            set(item.rgb)
+            for (const o of g.querySelectorAll('button')) o.setAttribute('aria-pressed', String(o === b))
+          }
+          g.appendChild(b)
+        }
+      }
+      buttons('inks', INKS, (v) => (ink = v), INKS[0])
+      buttons('grounds', GROUNDS, (v) => (ground = v), GROUNDS[0])
+
+      const video = document.createElement('video')
+      video.muted = true
+      video.loop = true
+      video.playsInline = true
+      video.src = 'sample-video.mp4'
+      video.play().catch(() => {})
+
+      function useFile(file) {
+        if (!file) return
+        video.src = URL.createObjectURL(file)
+        video.play().catch(() => {})
+        trail.fill(0)
+      }
+      document.getElementById('file').onchange = (e) => useFile(e.target.files[0])
+      addEventListener('dragover', (e) => e.preventDefault())
+      addEventListener('drop', (e) => {
+        e.preventDefault()
+        useFile(e.dataTransfer.files[0])
+      })
+      const play = document.getElementById('play')
+      play.onclick = () => {
+        if (video.paused) video.play()
+        else video.pause()
+        play.textContent = video.paused ? 'Play' : 'Pause'
+        play.setAttribute('aria-pressed', String(video.paused))
+      }
+      const flip = document.getElementById('flip')
+      flip.onclick = () => {
+        lightSubject = !lightSubject
+        flip.setAttribute('aria-pressed', String(lightSubject))
+      }
+      const softIn = document.getElementById('soft')
+      const cutIn = document.getElementById('cut')
+
+      // One small canvas per blur strength; the browser's own blur filter does the heavy lifting.
+      const work = document.createElement('canvas')
+      work.width = W
+      work.height = H
+      const wctx = work.getContext('2d', { willReadFrequently: true })
+      function frame(blurPx) {
+        const s = Math.max(W / video.videoWidth, H / video.videoHeight)
+        const w = video.videoWidth * s
+        const h = video.videoHeight * s
+        wctx.filter = blurPx > 0 ? `blur(${blurPx}px)` : 'none'
+        // Drawn slightly oversize when blurred, so the blur does not pull the board's edge toward black.
+        const m = blurPx * 3
+        wctx.drawImage(video, (W - w) / 2 - m, (H - h) / 2 - m, w + m * 2, h + m * 2)
+        return wctx.getImageData(0, 0, W, H).data
+      }
+
+      // Auto levels, eased over time so the cut does not flicker as the light in the clip changes.
+      const levels = { clay: [0, 1], melt: [0, 1] }
+      function tones(d, key) {
+        const L = new Float32Array(N)
+        const hist = new Uint32Array(256)
+        for (let i = 0; i < N; i++) {
+          const v = (d[i * 4] * 0.2126 + d[i * 4 + 1] * 0.7152 + d[i * 4 + 2] * 0.0722) | 0
+          L[i] = v
+          hist[v]++
+        }
+        let acc = 0
+        let lo = 0
+        let hi = 255
+        for (let v = 0; v < 256; v++) {
+          acc += hist[v]
+          if (acc < N * 0.03) lo = v
+          if (acc < N * 0.97) hi = v
+        }
+        const l = levels[key]
+        l[0] = mix(l[0], lo, 0.1)
+        l[1] = mix(l[1], hi, 0.1)
+        const span = Math.max(8, l[1] - l[0])
+        for (let i = 0; i < N; i++) {
+          const n = clamp((L[i] - l[0]) / span)
+          // Ink is the dark of the frame unless the subject is the light thing.
+          L[i] = lightSubject ? n : 1 - n
+        }
+        return L
+      }
+
+      const trail = new Float32Array(N)
+      const ctxs = [0, 1, 2, 3].map((i) => document.getElementById('c' + i).getContext('2d'))
+      const outs = ctxs.map((c) => c.createImageData(W, H))
+
+      function paintCut(out, field) {
+        const c = Number(cutIn.value)
+        const o = out.data
+        for (let i = 0; i < N; i++) {
+          const f = field[i]
+          const t = step(c - 0.035, c + 0.035, f)
+          // The densest part of the subject gets a deeper tone of the same ink, like the reference's core.
+          const core = step(c + 0.22, c + 0.3, f) * 0.28
+          for (let k = 0; k < 3; k++) o[i * 4 + k] = mix(ground[k], ink[k] * (1 - core), t)
+          o[i * 4 + 3] = 255
+        }
+      }
+
+      function draw() {
+        if (video.readyState >= 2 && video.videoWidth) {
+          const s = Number(softIn.value)
+          const raw = frame(0)
+          outs[0].data.set(raw)
+          ctxs[0].putImageData(outs[0], 0, 0)
+
+          // 1 and 2: the type's recipe on the footage, blur then cut.
+          const clay = tones(frame(2 + s * 14), 'clay')
+          paintCut(outs[1], clay)
+          ctxs[1].putImageData(outs[1], 0, 0)
+
+          // Trails: what was ink stays ink for a while and fades, never brighter than the cut itself.
+          if (!video.paused) for (let i = 0; i < N; i++) trail[i] = Math.max(clay[i], trail[i] * 0.94)
+          paintCut(outs[2], trail)
+          ctxs[2].putImageData(outs[2], 0, 0)
+
+          // 3: a much heavier blur through three colours.
+          const melt = tones(frame(10 + s * 30), 'melt')
+          const o = outs[3].data
+          for (let i = 0; i < N; i++) {
+            const f = melt[i]
+            const a = step(0.2, 0.55, f)
+            const b = step(0.55, 0.9, f)
+            for (let k = 0; k < 3; k++) o[i * 4 + k] = mix(mix(ground[k], ACID[k], a), VIOLET[k], b)
+            o[i * 4 + 3] = 255
+          }
+          ctxs[3].putImageData(outs[3], 0, 0)
+        }
+        requestAnimationFrame(draw)
+      }
+      requestAnimationFrame(draw)
+    </script>
+  </body>
+</html>

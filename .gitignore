@@ -27,3 +27,5 @@ dist-ssr
 .netlify
 # A studio photo of a person, used by the sketch page; not for a public repository
 sketches/sample.webp
+# A generated clip of a person, used by the video sketch page; not for a public repository
+sketches/sample-video.mp4
