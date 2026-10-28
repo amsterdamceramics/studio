@@ -47,7 +47,7 @@ interface Props {
   /** Column and row bands to draw, when the grid is shown. */
   grid: { cols: [number, number][]; rows: [number, number][] } | null
   /** Labelled frames for where a reel is cropped or covered elsewhere on Instagram, in board pixels. */
-  safe: { id: string; label: string; x: number; y: number; w: number; h: number; dash: 'long' | 'dot' | 'solid' }[] | null
+  safe: { id: string; label: string; x: number; y: number; w: number; h: number; colour: string }[] | null
 }
 
 /** How close, in screen pixels, an edge has to come before it snaps. */
@@ -213,13 +213,12 @@ export function Stage({ paints, textShown, loops, source, frame, background, bac
           {safe && (
             <g aria-hidden="true" pointerEvents="none">
               {safe.map((f, i) => {
-                const dash = f.dash === 'long' ? `${8 * px} ${5 * px}` : f.dash === 'dot' ? `${1.5 * px} ${4 * px}` : undefined
                 const ly = labelY[i]
                 return (
                   <g key={f.id}>
-                    <rect x={f.x + px} y={f.y} width={f.w - px * 2} height={f.h} fill="none" stroke={ink} strokeOpacity={0.85} strokeWidth={px * 1.5} strokeDasharray={dash} strokeLinecap="round" />
-                    <rect x={f.x + 8 * px} y={ly} width={(f.label.length * 6.6 + 12) * px} height={18 * px} rx={4 * px} fill={light ? '#fff' : '#000'} fillOpacity={0.75} />
-                    <text x={f.x + 14 * px} y={ly + 13 * px} fontSize={11 * px} fontWeight={600} fill={ink}>
+                    <rect x={f.x + px} y={f.y} width={f.w - px * 2} height={f.h} fill="none" stroke={f.colour} strokeWidth={px * 2} />
+                    <rect x={f.x + 8 * px} y={ly} width={(f.label.length * 6.6 + 12) * px} height={18 * px} rx={4 * px} fill={f.colour} />
+                    <text x={f.x + 14 * px} y={ly + 13 * px} fontSize={11 * px} fontWeight={600} fill="#fff">
                       {f.label}
                     </text>
                   </g>

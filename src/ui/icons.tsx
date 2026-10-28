@@ -17,3 +17,9 @@ export const AlignRight = () => <Icon d="M13.5 2.5v11M3.5 5.5h7M6.5 10.5h4" />
 export const AlignTop = () => <Icon d="M2.5 2.5h11M5.5 5.5v7M10.5 5.5v4" />
 export const AlignMiddle = () => <Icon d="M2.5 8h11M5.5 4v8M10.5 5.5v5" />
 export const AlignBottom = () => <Icon d="M2.5 13.5h11M5.5 3.5v7M10.5 6.5v4" />
+
+export const UndoIcon = () => <Icon d="M5.5 3.5L2.5 6.5l3 3M2.5 6.5h7a3.5 3.5 0 0 1 0 7h-2" />
+export const RedoIcon = () => <Icon d="M10.5 3.5l3 3-3 3M13.5 6.5h-7a3.5 3.5 0 0 0 0 7h2" />
+/** A window with its left or right column marked, for showing and hiding the side panels. */
+export const SidebarLeft = () => <Icon d="M2.5 3.5h11v9h-11zM6 3.5v9" />
+export const SidebarRight = () => <Icon d="M2.5 3.5h11v9h-11zM10 3.5v9" />

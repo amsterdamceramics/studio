@@ -45,7 +45,7 @@ import {
 } from './engine'
 import { COLORS, PRESETS, RAMPS } from './presets'
 import { IconButton, Panel, Reset, Section, Segmented, Slider, Toggle } from './ui/controls'
-import { AlignBottom, AlignCentre, AlignLeft, AlignMiddle, AlignRight, AlignTop, Minus, Plus } from './ui/icons'
+import { AlignBottom, AlignCentre, AlignLeft, AlignMiddle, AlignRight, AlignTop, Minus, Plus, RedoIcon, SidebarLeft, SidebarRight, UndoIcon } from './ui/icons'
 import { Stage, type View } from './ui/Stage'
 
 const BOARDS = [
@@ -95,9 +95,9 @@ const DEFAULT_GRID: Grid = { columns: 5, side: 80, rows: 10, top: 124, gutter: 2
  */
 const FEED_CROP = { top: 285, bottom: 1635, inset: 124 }
 const SAFE_FRAMES = [
-  { id: 'feed', label: 'Feed 4:5', x: 0, y: 285, w: 1080, h: 1350, dash: 'long' as const },
-  { id: 'grid', label: 'Profile grid 3:4', x: 0, y: 240, w: 1080, h: 1440, dash: 'dot' as const },
-  { id: 'clear', label: 'Clear of Instagram buttons', x: 0, y: 269, w: 1015, h: 979, dash: 'solid' as const },
+  { id: 'feed', label: 'Feed 4:5', x: 0, y: 285, w: 1080, h: 1350, colour: '#0A84FF' },
+  { id: 'grid', label: 'Profile grid 3:4', x: 0, y: 240, w: 1080, h: 1440, colour: '#FF9F0A' },
+  { id: 'clear', label: 'Clear of Instagram buttons', x: 0, y: 269, w: 1015, h: 979, colour: '#BF5AF2' },
 ]
 
 function gridLines(w: number, h: number, g: Grid) {
@@ -139,12 +139,14 @@ const FIRST_LAYER: TextLayer = { id: 1, text: 'amsterdam\nceramics', fontSize: 1
 
 /** Ready-made boards. Text, sizes and places are measured from the studio's own Figma files. */
 const ACID = '#C7FF00'
-const TEMPLATES: { id: string; label: string; title: string; board: BoardId; layers: Omit<TextLayer, 'id'>[] }[] = [
+const TEMPLATES: { id: string; label: string; title: string; board: BoardId; ground: string; layers: Omit<TextLayer, 'id'>[] }[] = [
   {
     id: 'main',
     label: 'Main visual',
     title: 'The 9:16 main visual: clay title, plain strapline, dates and venue',
     board: 'story',
+    // Dark, so the acid type reads before a photo goes in.
+    ground: '#000000',
     layers: [
       { text: 'amsterdam\nceramics', style: 'clay', fontSize: 184, align: 'left', lineHeight: PLAIN_TYPE.lineHeight, fill: ACID, x: 80, y: 749 },
       { text: 'Amsterdam’s exhibition for contemporary ceramics', style: 'plain', fontSize: 32, align: 'center', lineHeight: 1.15, fill: ACID, x: null, y: 409 },
@@ -251,18 +253,21 @@ function render(ts: TypeSetter, type: Type, layers: TextLayer[], grid: Grid, par
 export default function App() {
   const [ts, setTs] = useState<TypeSetter | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [type, setType] = useState<Type>(DEFAULT_TYPE)
+  // A first visit opens on the Main visual, so there is a real starting point rather than a blank word.
+  const [type, setType] = useState<Type>({ ...DEFAULT_TYPE, board: TEMPLATES[0].board })
   const [params, setParams] = useState<OrganicParams>({ ...PRESETS[0].params, seed: 1 })
-  const [layers, setLayers] = useState<TextLayer[]>([FIRST_LAYER])
+  const [layers, setLayers] = useState<TextLayer[]>(() => TEMPLATES[0].layers.map((l, i) => ({ ...l, id: i + 1 })))
   // The texts being edited; the last one picked is the one whose words and place the panel shows.
-  const [selection, setSelection] = useState<number[]>([FIRST_LAYER.id])
+  const [selection, setSelection] = useState<number[]>([])
   const setSelected = (id: number) => setSelection([id])
   /** Shift or ⌘ adds a text to the selection or takes it out, as in Figma. */
   const pick = (id: number, add: boolean) =>
     setSelection((sel) => (!add ? [id] : sel.includes(id) ? (sel.length > 1 ? sel.filter((s) => s !== id) : sel) : [...sel, id]))
   const [grid, setGrid] = useState<Grid>(DEFAULT_GRID)
   const [guides, setGuides] = useState({ grid: false, safe: false })
-  const [background, setBackground] = useState('#FFFFFF')
+  // The side panels can be hidden to give the board the whole window, as in a Mac app's sidebar and inspector.
+  const [panels, setPanels] = useState({ left: true, right: true })
+  const [background, setBackground] = useState(TEMPLATES[0].ground)
   const [transparent, setTransparent] = useState(false)
   const [view, setView] = useState<View>({ outline: false, points: false, ghost: false, actualSize: false })
   const [motionSet, setMotion] = useState<Motion>('off')
@@ -301,6 +306,7 @@ export default function App() {
     setLayers(t.layers.map((l, i) => ({ ...l, id: i + 1 })))
     setSelected(1)
     setGrid(DEFAULT_GRID)
+    setBackground(t.ground)
     setGuides({ grid: true, safe: t.board === 'story' })
   }
   const [playing, setPlaying] = useState(true)
@@ -314,7 +320,7 @@ export default function App() {
   const restOf = (m: Motion) => restBy[m] ?? REST[m].start
   const [tab, setTab] = useState<'type' | 'image'>('type')
   // The open card in each side panel; each tab opens on its first card.
-  const [leftOpen, setLeftOpen] = useState<string | null>('Text')
+  const [leftOpen, setLeftOpen] = useState<string | null>('Templates')
   const [rightOpen, setRightOpen] = useState<string | null>('Clay')
   // A photo, or a video: then `canvas` is a still of its first frame and `video` plays underneath.
   const [photo, setPhoto] = useState<{ canvas: HTMLCanvasElement; name: string; video?: HTMLVideoElement; duration?: number } | null>(null)
@@ -599,6 +605,7 @@ export default function App() {
     if ((k === 'backspace' || k === 'delete') && !mod && fixed.w && !none && chosen.length < layers.length) return deleteLayer(), true
     if (k === 't' && !mod && !e.shiftKey && fixed.w) return addLayer(), true
     if (k === ' ' && moving) return setPlaying((p) => !p), true
+    if (k === '\\' && mod) return setPanels((p) => (p.left || p.right ? { left: false, right: false } : { left: true, right: true })), true
     return false
   }
   const keys = useRef({ undo, redo, nudge, clear, shortcut })
@@ -897,7 +904,7 @@ export default function App() {
   const size = out ? `${Math.round(out.frame.w * out.frame.scale)} × ${Math.round(out.frame.h * out.frame.scale)}` : ''
 
   return (
-    <div className="app">
+    <div className={`app ${panels.left ? '' : 'no-left'} ${panels.right ? '' : 'no-right'}`}>
       <header className="topbar">
         <div className="brand">
           <img className="brand-icon" src={`${import.meta.env.BASE_URL}apple-touch-icon.png`} alt="" width={30} height={30} />
@@ -906,10 +913,18 @@ export default function App() {
           </span>
         </div>
         <div className="view-toggles">
-          <button type="button" className="toggle" onClick={undo} disabled={steps.undo === 0} title="Undo the last change (⌘Z)">Undo</button>
-          <button type="button" className="toggle" onClick={redo} disabled={steps.redo === 0} title="Redo (⇧⌘Z)">Redo</button>
+          <IconButton label={`${panels.left ? 'Hide' : 'Show'} the left panel (⌘\\ hides both)`} onClick={() => setPanels({ ...panels, left: !panels.left })}>
+            <SidebarLeft />
+          </IconButton>
           <span className="divider" aria-hidden="true" />
-          <Toggle on={view.actualSize} onChange={(v) => setView({ ...view, actualSize: v })}>100%</Toggle>
+          <IconButton label="Undo (⌘Z)" onClick={undo} disabled={steps.undo === 0}>
+            <UndoIcon />
+          </IconButton>
+          <IconButton label="Redo (⇧⌘Z)" onClick={redo} disabled={steps.redo === 0}>
+            <RedoIcon />
+          </IconButton>
+          <span className="divider" aria-hidden="true" />
+          <Toggle on={view.actualSize} onChange={(v) => setView({ ...view, actualSize: v })} title="Show the board at its real pixel size">Actual size</Toggle>
           {fixed.w > 0 && (
             <>
               <span className="divider" aria-hidden="true" />
@@ -917,6 +932,10 @@ export default function App() {
               {story && <Toggle on={guides.safe} onChange={(v) => setGuides({ ...guides, safe: v })} title="Safe area (⇧S)">Safe area</Toggle>}
             </>
           )}
+          <span className="divider" aria-hidden="true" />
+          <IconButton label={`${panels.right ? 'Hide' : 'Show'} the right panel (⌘\\ hides both)`} onClick={() => setPanels({ ...panels, right: !panels.right })}>
+            <SidebarRight />
+          </IconButton>
         </div>
         <div className="exports">
           {moving && (
@@ -931,8 +950,55 @@ export default function App() {
         </div>
       </header>
 
+      {panels.left && (
       <aside className="panel left">
         <Panel open={leftOpen} setOpen={setLeftOpen}>
+        <Section title="Templates" summary={saved.length ? `${TEMPLATES.length + saved.length} templates` : TEMPLATES[0].label}>
+          <div className="chips">
+            {TEMPLATES.map((t) => (
+              <button key={t.id} type="button" className="chip" title={t.title} onClick={() => applyTemplate(t)}>
+                {t.label}
+              </button>
+            ))}
+            {saved.map((t) => (
+              <span key={t.id} className="chip saved">
+                <button type="button" className="saved-use" title="Use this template; your photo or video stays" onClick={() => useSaved(t)}>
+                  {t.name}
+                </button>
+                <button type="button" className="saved-remove" aria-label={`Remove ${t.name}`} title="Remove from this browser" onClick={() => setSaved(saved.filter((x) => x.id !== t.id))}>
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+          {naming !== null ? (
+            <form
+              className="name-row"
+              onSubmit={(e) => {
+                e.preventDefault()
+                saveTemplate(naming)
+              }}
+            >
+              <input className="name-input" autoFocus value={naming} placeholder="Name" aria-label="Template name" onChange={(e) => setNaming(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && setNaming(null)} />
+              <button type="submit" className="btn">Save</button>
+            </form>
+          ) : (
+            <button type="button" className="btn" title="Saves the text, colours, layout and motion. The photo or video stays out: whoever uses the template brings their own" onClick={() => setNaming('')}>
+              Save as template
+            </button>
+          )}
+          <div className="actions template-files">
+            {saved.length > 0 && (
+              <button type="button" className="link" onClick={exportTemplates} title="Saved templates live in this browser only. Export them as one file to send to the team">
+                Export…
+              </button>
+            )}
+            <label className="link file-link" title="Add templates from a file someone sent you">
+              <input type="file" accept="application/json,.json" onChange={(e) => importTemplates(e.target.files?.[0])} />
+              Import…
+            </label>
+          </div>
+        </Section>
         <div className="tabs" role="tablist" aria-label="Layer to edit">
           <button type="button" role="tab" aria-selected={tab === 'type'} className={`chip ${tab === 'type' ? 'on' : ''}`} onClick={() => {
             setTab('type')
@@ -1324,53 +1390,6 @@ export default function App() {
 
         {tab === 'type' && (
         <>
-        <Section title="Templates" summary={saved.length ? `${TEMPLATES.length + saved.length} templates` : TEMPLATES[0].label}>
-          <div className="chips">
-            {TEMPLATES.map((t) => (
-              <button key={t.id} type="button" className="chip" title={t.title} onClick={() => applyTemplate(t)}>
-                {t.label}
-              </button>
-            ))}
-            {saved.map((t) => (
-              <span key={t.id} className="chip saved">
-                <button type="button" className="saved-use" title="Use this template; your photo or video stays" onClick={() => useSaved(t)}>
-                  {t.name}
-                </button>
-                <button type="button" className="saved-remove" aria-label={`Remove ${t.name}`} title="Remove from this browser" onClick={() => setSaved(saved.filter((x) => x.id !== t.id))}>
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-          {naming !== null ? (
-            <form
-              className="name-row"
-              onSubmit={(e) => {
-                e.preventDefault()
-                saveTemplate(naming)
-              }}
-            >
-              <input className="name-input" autoFocus value={naming} placeholder="Name" aria-label="Template name" onChange={(e) => setNaming(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && setNaming(null)} />
-              <button type="submit" className="btn">Save</button>
-            </form>
-          ) : (
-            <button type="button" className="btn" title="Saves everything on the board except the photo or video" onClick={() => setNaming('')}>
-              Save as template
-            </button>
-          )}
-          <div className="actions">
-            {saved.length > 0 && (
-              <button type="button" className="link" onClick={exportTemplates} title="One file with all your templates, to send to the team">
-                Download for the team
-              </button>
-            )}
-            <label className="link file-link" title="Add templates from a file someone sent you">
-              <input type="file" accept="application/json,.json" onChange={(e) => importTemplates(e.target.files?.[0])} />
-              Add from file
-            </label>
-          </div>
-          <p className="motion-hint">Templates keep the text, colours, layout and motion; the photo or video stays yours. Saved in this browser only, so share them as a file.</p>
-        </Section>
 
         <Section
           title="Text"
@@ -1498,6 +1517,7 @@ export default function App() {
         )}
         </Panel>
       </aside>
+      )}
 
       <main className="center">
         {error ? (
@@ -1529,12 +1549,11 @@ export default function App() {
         <footer className="status">
           <span>{size} px</span>
           {out?.overflow && <span className="warn">Some text runs past the board</span>}
-          <span>{out?.nodes ?? 0} points</span>
-          <span>{out ? out.ms.toFixed(0) : 0} ms</span>
           {note && <span className="note" role="status">{note}</span>}
         </footer>
       </main>
 
+      {panels.right && (
       <aside className="panel right">
         <Panel open={rightOpen} setOpen={setRightOpen}>
         {!hasClay && <p className="panel-note">Plain type is set as the font draws it, so the clay controls and type motion are off. Set a text's Style to Clay to use them.</p>}
@@ -1653,6 +1672,7 @@ export default function App() {
         )}
         </Panel>
       </aside>
+      )}
     </div>
   )
 }

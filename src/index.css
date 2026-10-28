@@ -882,3 +882,26 @@ input[type='range']:active::-webkit-slider-thumb {
   height: 1px;
   opacity: 0;
 }
+
+/* Hiding a side panel gives its column to the board. */
+.panel.left {
+  grid-column: 1;
+}
+.center {
+  grid-column: 2;
+}
+.panel.right {
+  grid-column: 3;
+}
+.app.no-left {
+  grid-template-columns: 0 minmax(0, 1fr) 320px;
+}
+.app.no-right {
+  grid-template-columns: 304px minmax(0, 1fr) 0;
+}
+.app.no-left.no-right {
+  grid-template-columns: 0 minmax(0, 1fr) 0;
+}
+.view-toggles {
+  align-items: center;
+}
