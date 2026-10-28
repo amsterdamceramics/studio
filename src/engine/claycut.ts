@@ -25,9 +25,7 @@ export const CLAY_CUT: ClayCut = { softness: 0.5, level: 0.5, detail: 0, light: 
 export const cutBlur = (softness: number) => (0.5 + softness * 14) / 450
 /** The neighbourhood Detail compares against. */
 export const WIDE_BLUR = 18 / 450
-/** Half the width of the soft edge, in field units. Anything between the two colours is only this edge. */
-export const CUT_EDGE = 0.035
-export const DETAIL_GAIN = 1.8
+const DETAIL_GAIN = 1.8
 
 export interface CutFields {
   w: number
@@ -90,8 +88,8 @@ export function levelsOf(field: Float32Array): [number, number] {
 
 const clamp = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v)
 
-/** The value the cut is made on, 0..1, 1 where the ink goes. Mirrors the shader. */
-function fieldAt(cut: number, wide: number, levels: [number, number], light: boolean, detail: number) {
+/** The value the cut is made on, about 0..1, 1 where the ink goes. */
+export function fieldAt(cut: number, wide: number, levels: [number, number], light: boolean, detail: number) {
   const span = levels[1] - levels[0]
   let f = clamp((cut - levels[0]) / span)
   let w = clamp((wide - levels[0]) / span)

@@ -1,4 +1,4 @@
-import { CUT_EDGE, DETAIL_GAIN, cutFields, levelsOf, type ClayCut } from './claycut'
+import { cutFields, fieldAt, levelsOf, type ClayCut } from './claycut'
 import type { GradientMap, Placement } from './image'
 
 /**
@@ -50,7 +50,7 @@ void main() {
   gl_Position = vec4(aPos, 0.0, 1.0);
 }`
 
-const FRAG = /* glsl */ `
+const FRAG = `
 precision highp float;
 varying vec2 vUv;
 uniform sampler2D uPhoto;
@@ -71,8 +71,8 @@ uniform float uGain;
 uniform vec4 uSpots[8];
 uniform sampler2D uCut;
 uniform float uCutOn;
-uniform vec2 uLevels;
-uniform vec3 uCutSet;
+uniform float uLevel;
+uniform vec2 uTexel;
 
 float curve(float l) {
   float t = pow(clamp(l, 0.0, 1.0), uGamma);
@@ -104,12 +104,14 @@ float bleed(vec2 uv, vec2 n, float feather) {
 void main() {
   vec2 puv = uXform.xy + vUv * uXform.zw;
   if (uCutOn > 0.5) {
-    // Clay cut: R is the tones after the cut's blur, G after the wide blur Detail compares against.
-    vec2 c = texture2D(uCut, puv).rg;
-    vec2 t = clamp((c - uLevels.x) / (uLevels.y - uLevels.x), 0.0, 1.0);
-    if (uCutSet.z < 0.5) t = 1.0 - t;
-    float f = mix(t.x, 0.5 + (t.x - t.y) * ${DETAIL_GAIN.toFixed(2)}, uCutSet.y);
-    float ink = smoothstep(uCutSet.x - ${CUT_EDGE}, uCutSet.x + ${CUT_EDGE}, f);
+    // Clay cut: R is the field the cut is made on, worked out in full precision on the CPU. The edge is
+    // drawn about a pixel and a half wide wherever it falls, so it reads as a clean outline instead of a
+    // grainy band where the picture changes slowly.
+    float f = texture2D(uCut, puv).r;
+    float gx = texture2D(uCut, puv + vec2(uTexel.x, 0.0)).r - texture2D(uCut, puv - vec2(uTexel.x, 0.0)).r;
+    float gy = texture2D(uCut, puv + vec2(0.0, uTexel.y)).r - texture2D(uCut, puv - vec2(0.0, uTexel.y)).r;
+    float w = max(length(vec2(gx, gy)) * 0.4, 0.0005);
+    float ink = smoothstep(uLevel - w, uLevel + w, f);
     gl_FragColor = vec4(mix(uHiA, uLoA, ink), 1.0);
     return;
   }
@@ -268,7 +270,9 @@ export class PhotoFx {
   private cutTex: WebGLTexture
   private source: { el: HTMLCanvasElement | HTMLVideoElement; still: boolean } | null = null
   /** The softness the cut texture was made at; null when it needs making. */
-  private cutMadeAt: number | null = null
+  /** The settings the cut texture was made with; null when it needs making. */
+  private cutMadeAt: string | null = null
+  private lastField: Float32Array | null = null
   private levels: [number, number] = [0, 255]
   /** A new picture: its levels are taken as they are instead of eased toward. */
   private fresh = true
@@ -311,7 +315,7 @@ export class PhotoFx {
     gl.enableVertexAttribArray(pos)
     gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0)
 
-    for (const name of ['uPhoto', 'uBlur', 'uNoise', 'uXform', 'uAspect', 'uPhase', 'uStrength', 'uEffect', 'uLoA', 'uHiA', 'uLoB', 'uHiB', 'uMapOn', 'uGamma', 'uGain', 'uSpots', 'uCut', 'uCutOn', 'uLevels', 'uCutSet']) {
+    for (const name of ['uPhoto', 'uBlur', 'uNoise', 'uXform', 'uAspect', 'uPhase', 'uStrength', 'uEffect', 'uLoA', 'uHiA', 'uLoB', 'uHiB', 'uMapOn', 'uGamma', 'uGain', 'uSpots', 'uCut', 'uCutOn', 'uLevel', 'uTexel']) {
       this.uniforms[name] = gl.getUniformLocation(program, name)
     }
 
@@ -404,29 +408,41 @@ export class PhotoFx {
   }
 
   /**
-   * The tone fields Clay cut is made from. A still is worked out again only when the softness
-   * changes; a video every frame, with its levels eased so the cut does not flicker as the light changes.
+   * The field Clay cut is made on. A still is worked out again only when a setting that shapes the
+   * field changes; a video every frame, with its levels eased and each frame leaning on the last, so
+   * the cut does not flicker or crawl with the clip's own noise.
    */
-  private makeCut(softness: number) {
-    if (!this.source || this.cutMadeAt === softness) return
+  private makeCut(cut: ClayCut) {
+    const key = `${cut.softness}|${cut.detail}|${cut.light}`
+    if (!this.source || this.cutMadeAt === key) return
     const { el, still } = this.source
-    const fields = cutFields(el, this.size.w, this.size.h, still ? 720 : 400, softness)
+    const fields = cutFields(el, this.size.w, this.size.h, still ? 720 : 400, cut.softness)
     const [lo, hi] = levelsOf(fields.cut)
     const ease = still || this.fresh ? 1 : 0.3
     this.levels = [this.levels[0] + (lo - this.levels[0]) * ease, this.levels[1] + (hi - this.levels[1]) * ease]
+    const { w, h } = fields
+    let field: Float32Array = new Float32Array(w * h)
+    for (let i = 0; i < w * h; i++) field[i] = fieldAt(fields.cut[i], fields.wide[i], this.levels, cut.light, cut.detail)
+    // A light extra blur in full precision smooths out the steps of the 8-bit picture it came from.
+    field = boxBlur(field, w, h, 1)
+    const last = this.lastField
+    if (!still && !this.fresh && last && last.length === field.length) for (let i = 0; i < field.length; i++) field[i] = last[i] + (field[i] - last[i]) * 0.6
+    this.lastField = field
     this.fresh = false
-    const packed = new Uint8Array(fields.w * fields.h * 4)
-    for (let i = 0; i < fields.w * fields.h; i++) {
-      packed[i * 4] = fields.cut[i]
-      packed[i * 4 + 1] = fields.wide[i]
-      packed[i * 4 + 3] = 255
-    }
+
     const gl = this.gl
     gl.activeTexture(gl.TEXTURE3)
     gl.bindTexture(gl.TEXTURE_2D, this.cutTex)
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1)
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, fields.w, fields.h, 0, gl.RGBA, gl.UNSIGNED_BYTE, packed)
-    this.cutMadeAt = softness
+    if (this.mips) {
+      const gl2 = gl as unknown as WebGL2RenderingContext
+      gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.R16F, w, h, 0, gl2.RED, gl2.FLOAT, field)
+    } else {
+      const packed = new Uint8Array(w * h * 4)
+      for (let i = 0; i < w * h; i++) packed[i * 4] = Math.max(0, Math.min(255, field[i] * 255))
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, packed)
+    }
+    this.cutMadeAt = key
   }
 
   /** Draw one frame. The returned canvas is reused, so copy it out before rendering the next. */
@@ -461,9 +477,9 @@ export class PhotoFx {
     gl.uniform4fv(u.uSpots, spots(f.seed))
     gl.uniform1f(u.uCutOn, f.cut ? 1 : 0)
     if (f.cut) {
-      this.makeCut(f.cut.softness)
-      gl.uniform2f(u.uLevels, this.levels[0] / 255, this.levels[1] / 255)
-      gl.uniform3f(u.uCutSet, f.cut.level, f.cut.detail, f.cut.light ? 1 : 0)
+      this.makeCut(f.cut)
+      gl.uniform1f(u.uLevel, f.cut.level)
+      gl.uniform2f(u.uTexel, sx / W, sy / H)
     }
     gl.drawArrays(gl.TRIANGLES, 0, 3)
     return this.canvas
