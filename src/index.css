@@ -755,3 +755,54 @@ input[type='range']:active::-webkit-slider-thumb {
 .text-box {
   cursor: move;
 }
+
+/* Saved templates */
+.chip.saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  padding: 0;
+}
+.chip.saved button {
+  height: 100%;
+  border: 0;
+  background: none;
+  color: inherit;
+}
+.saved-use {
+  padding: 0 4px 0 12px;
+}
+.saved-remove {
+  padding: 0 10px 0 4px;
+  color: var(--faint) !important;
+}
+.saved-remove:hover {
+  color: var(--text) !important;
+}
+.name-row {
+  display: flex;
+  gap: 8px;
+}
+.name-input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.name-input:focus {
+  outline: none;
+  border-color: var(--acid);
+}
+.file-link {
+  position: relative;
+  cursor: pointer;
+}
+.file-link input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}

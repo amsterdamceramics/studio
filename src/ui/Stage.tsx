@@ -39,6 +39,8 @@ interface Props {
   editable: boolean
   /** `add` is true with shift or ⌘ held: add to the selection or take out, instead of replacing it. */
   onSelect: (id: number, add: boolean) => void
+  /** A click on the empty board lets go of the selection. */
+  onClear: () => void
   onMove: (id: number, x: number, y: number) => void
   /** Lines a dragged box's edges and middle snap to, in board pixels. */
   snaps: { x: number[]; y: number[] }
@@ -59,7 +61,7 @@ function snapTo(edges: number[], lines: number[], reach: number) {
 }
 
 /** The artboard: live vector paths over the photo. Selection, grid and safe area are drawn here only and never export. */
-export function Stage({ paints, textShown, loops, source, frame, background, backdrop, typeClip, view, boxes, selected, editable, onSelect, onMove, snaps, grid, safe }: Props) {
+export function Stage({ paints, textShown, loops, source, frame, background, backdrop, typeClip, view, boxes, selected, editable, onSelect, onClear, onMove, snaps, grid, safe }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const photo = useRef<HTMLCanvasElement>(null)
 
@@ -147,10 +149,25 @@ export function Stage({ paints, textShown, loops, source, frame, background, bac
 
   const ui = safe?.ui
   return (
-    <div ref={host} className={`stage ${view.actualSize ? 'scroll' : ''}`}>
+    <div
+      ref={host}
+      className={`stage ${view.actualSize ? 'scroll' : ''}`}
+      onPointerDown={(e) => {
+        if (editable && e.target === e.currentTarget) onClear()
+      }}
+    >
       <div className="artboard" style={{ width: w * zoom, height: h * zoom, background }}>
         {backdrop && <canvas ref={photo} className="artboard-photo" aria-hidden="true" />}
-        <svg width={w * zoom} height={h * zoom} viewBox={`0 0 ${w} ${h}`} role="img" aria-label="Generated typography preview">
+        <svg
+          width={w * zoom}
+          height={h * zoom}
+          viewBox={`0 0 ${w} ${h}`}
+          role="img"
+          aria-label="Generated typography preview"
+          onPointerDown={(e) => {
+            if (editable && !(e.target as Element).classList.contains('text-box')) onClear()
+          }}
+        >
           {view.ghost && <path d={ghost} fill="none" stroke={ink} strokeOpacity={0.35} strokeWidth={px} strokeDasharray={`${3 * px} ${3 * px}`} />}
           {typeClip && (
             <clipPath id="type-hide">

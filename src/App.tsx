@@ -264,6 +264,8 @@ export default function App() {
   const chosen = fixed.w ? layers.filter((l) => selection.includes(l.id)) : []
   const layer = (fixed.w && layers.find((l) => l.id === selection[selection.length - 1])) || chosen[0] || layers[0]
   const many = chosen.length > 1
+  // Nothing picked: no selection box on the board, and the panel waits for a text to be chosen.
+  const none = fixed.w > 0 && chosen.length === 0
   const isChosen = (id: number) => (many ? selection.includes(id) : id === layer.id)
   const motion: Motion = hasClay ? motionSet : 'off'
   // Style, size, alignment and colour change every selected text; the words only ever change the one shown.
@@ -475,9 +477,14 @@ export default function App() {
   const restore = (to: Snap) => {
     const h = history.current
     if (!h) return
+    h.committed = to
+    apply(to)
+    setSteps({ undo: h.undo.length, redo: h.redo.length })
+  }
+  /** Set every part of the artwork from a snapshot. */
+  const apply = (to: Snap) => {
     // The renderer holds the photo's pixels, so it has to be handed the old photo before the frame draws.
     if (to.photo && to.photo !== photo) fx?.setPhoto(to.photo.canvas)
-    h.committed = to
     setType(to.type)
     setParams(to.params)
     setLayers(to.layers)
@@ -504,7 +511,45 @@ export default function App() {
     setFxTune(to.fxTune)
     setFxSeed(to.fxSeed)
     setSwapTo(to.swapTo)
-    setSteps({ undo: h.undo.length, redo: h.redo.length })
+  }
+
+  // Saved templates: the whole design except the photo or video, which each person brings themselves.
+  // They live in this browser; a file carries them to someone else's.
+  type Design = Omit<Snap, 'photo' | 'trim'>
+  const [saved, setSaved] = useState<SavedTemplate<Design>[]>(() => loadTemplates<Design>())
+  useEffect(() => storeTemplates(saved), [saved])
+  const [naming, setNaming] = useState<string | null>(null)
+  const designOf = (): Design => {
+    const { photo: _p, trim: _t, ...design } = snap
+    return design
+  }
+  const saveTemplate = (name: string) => {
+    const label = name.trim() || `Template ${saved.length + 1}`
+    setSaved([...saved, { id: `${Date.now()}`, name: label, design: designOf() }])
+    setNaming(null)
+    flash(`Saved “${label}”`)
+  }
+  const useSaved = (t: SavedTemplate<Design>) => {
+    // Older files may miss settings added since; those keep what is on the board now.
+    apply({ ...snap, ...t.design, photo, trim })
+    setSelection([])
+    setGuides((g) => ({ ...g, safe: g.safe && t.design.type?.board === 'story' }))
+  }
+  const exportTemplates = () => {
+    download('ac-studio-templates.json', new Blob([JSON.stringify({ app: 'amsterdam-ceramics-studio', version: 1, templates: saved }, null, 2)], { type: 'application/json' }))
+  }
+  const importTemplates = async (file: File | undefined) => {
+    if (!file) return
+    try {
+      const data = JSON.parse(await file.text())
+      const list: SavedTemplate<Design>[] = Array.isArray(data?.templates) ? data.templates : []
+      const fresh = list.filter((t) => t && typeof t.name === 'string' && t.design && Array.isArray(t.design.layers))
+      if (!fresh.length) return flash('No templates in that file')
+      setSaved([...saved, ...fresh.map((t, i) => ({ ...t, id: `${Date.now()}-${i}` }))])
+      flash(`Added ${fresh.length} template${fresh.length === 1 ? '' : 's'}`)
+    } catch {
+      flash('Could not read that file')
+    }
   }
   const undo = () => {
     const h = history.current
@@ -524,19 +569,24 @@ export default function App() {
   }
   /** Arrow keys move the selected text on a fixed board, 1 px at a time, 10 with shift. */
   const nudge = (key: string, by: number) => {
-    const box = fixed.w ? out?.boxes.find((b) => b.id === layer.id) : null
+    const box = fixed.w && !none ? out?.boxes.find((b) => b.id === layer.id) : null
     if (!box) return false
     const dx = key === 'ArrowLeft' ? -by : key === 'ArrowRight' ? by : 0
     const dy = key === 'ArrowUp' ? -by : key === 'ArrowDown' ? by : 0
     moveLayer(layer.id, Math.round(box.x + dx), Math.round(box.y + dy))
     return true
   }
-  const keys = useRef({ undo, redo, nudge })
+  const clear = () => setSelection([])
+  const keys = useRef({ undo, redo, nudge, clear })
   useEffect(() => {
-    keys.current = { undo, redo, nudge }
+    keys.current = { undo, redo, nudge, clear }
   })
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !(e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement)) {
+        keys.current.clear()
+        return
+      }
       if (e.key.startsWith('Arrow') && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement)) {
         keys.current.nudge(e.key, e.shiftKey ? 10 : 1) && e.preventDefault()
         return
@@ -550,6 +600,21 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // A trackpad pinch arrives as a wheel event with ctrl held; left alone it zooms the whole page, which
+  // is easy to do by accident and hard to undo inside an app window. The board has its own 100% toggle.
+  useEffect(() => {
+    const stop = (e: Event) => {
+      if (e instanceof WheelEvent && !e.ctrlKey) return
+      e.preventDefault()
+    }
+    window.addEventListener('wheel', stop, { passive: false })
+    window.addEventListener('gesturestart', stop)
+    return () => {
+      window.removeEventListener('wheel', stop)
+      window.removeEventListener('gesturestart', stop)
+    }
   }, [])
 
   const flash = useCallback((msg: string) => {
@@ -1224,14 +1289,52 @@ export default function App() {
 
         {tab === 'type' && (
         <>
-        <Section title="Templates" summary="Main visual">
+        <Section title="Templates" summary={saved.length ? `${TEMPLATES.length + saved.length} templates` : TEMPLATES[0].label}>
           <div className="chips">
             {TEMPLATES.map((t) => (
               <button key={t.id} type="button" className="chip" title={t.title} onClick={() => applyTemplate(t)}>
                 {t.label}
               </button>
             ))}
+            {saved.map((t) => (
+              <span key={t.id} className="chip saved">
+                <button type="button" className="saved-use" title="Use this template; your photo or video stays" onClick={() => useSaved(t)}>
+                  {t.name}
+                </button>
+                <button type="button" className="saved-remove" aria-label={`Remove ${t.name}`} title="Remove from this browser" onClick={() => setSaved(saved.filter((x) => x.id !== t.id))}>
+                  ×
+                </button>
+              </span>
+            ))}
           </div>
+          {naming !== null ? (
+            <form
+              className="name-row"
+              onSubmit={(e) => {
+                e.preventDefault()
+                saveTemplate(naming)
+              }}
+            >
+              <input className="name-input" autoFocus value={naming} placeholder="Name" aria-label="Template name" onChange={(e) => setNaming(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && setNaming(null)} />
+              <button type="submit" className="btn">Save</button>
+            </form>
+          ) : (
+            <button type="button" className="btn" title="Saves everything on the board except the photo or video" onClick={() => setNaming('')}>
+              Save as template
+            </button>
+          )}
+          <div className="actions">
+            {saved.length > 0 && (
+              <button type="button" className="link" onClick={exportTemplates} title="One file with all your templates, to send to the team">
+                Download for the team
+              </button>
+            )}
+            <label className="link file-link" title="Add templates from a file someone sent you">
+              <input type="file" accept="application/json,.json" onChange={(e) => importTemplates(e.target.files?.[0])} />
+              Add from file
+            </label>
+          </div>
+          <p className="motion-hint">Templates keep the text, colours, layout and motion; the photo or video stays yours. Saved in this browser only, so share them as a file.</p>
         </Section>
 
         <Section
@@ -1264,7 +1367,9 @@ export default function App() {
           ) : (
             layers.length > 1 && <p className="motion-hint">Fit shows only the first text. Pick a board size to see all {layers.length}.</p>
           )}
-          {many ? (
+          {none ? (
+            <p className="motion-hint">Pick a text to edit it, here or on the board. Esc or a click on the empty board lets go again.</p>
+          ) : many ? (
             <p className="motion-hint">{chosen.length} texts selected. Style, size, alignment and colour change for all of them.</p>
           ) : (
           <textarea
@@ -1281,6 +1386,8 @@ export default function App() {
           ) : (
             <p className="motion-hint">Pick a board size to add more text</p>
           )}
+          {!none && (
+          <>
           <div className="field">
             <span className="field-label">Font</span>
             <span className="locked">Instrument Sans Bold</span>
@@ -1325,11 +1432,13 @@ export default function App() {
               </div>
             </div>
           )}
-          <Slider label="Size" value={layer.fontSize} min={12} max={600} step={1} reset={160} format={(v) => `${v} px`} onChange={(v) => setL('fontSize', v)} />
+          <Slider label="Size" hint="In steps of 8 px" value={layer.fontSize} min={8} max={600} step={8} reset={160} format={(v) => `${v} px`} onChange={(v) => setL('fontSize', v)} />
           <div className="field">
             <span className="field-label">Colour</span>
             <Swatches value={layer.fill} onChange={(v) => setL('fill', v)} label="Type colour" />
           </div>
+          </>
+          )}
         </Section>
         </>
         )}
@@ -1376,9 +1485,10 @@ export default function App() {
             typeClip={typeHide}
             view={view}
             boxes={out.boxes}
-            selected={chosen.length ? chosen.map((l) => l.id) : [layer.id]}
+            selected={fixed.w ? chosen.map((l) => l.id) : []}
             editable={fixed.w > 0 && !recording}
             onSelect={pick}
+            onClear={clear}
             onMove={moveLayer}
             snaps={snaps}
             grid={guides.grid ? lines : null}
@@ -1516,6 +1626,29 @@ export default function App() {
       </aside>
     </div>
   )
+}
+
+interface SavedTemplate<D> {
+  id: string
+  name: string
+  design: D
+}
+const TEMPLATE_KEY = 'ac-studio-templates'
+function loadTemplates<D>(): SavedTemplate<D>[] {
+  try {
+    const raw = localStorage.getItem(TEMPLATE_KEY)
+    const list = raw ? JSON.parse(raw) : []
+    return Array.isArray(list) ? list : []
+  } catch {
+    return []
+  }
+}
+function storeTemplates(list: SavedTemplate<unknown>[]) {
+  try {
+    localStorage.setItem(TEMPLATE_KEY, JSON.stringify(list))
+  } catch {
+    // Private windows can refuse storage; the templates then last until the page closes.
+  }
 }
 
 /** Seconds for a label: whole when it is whole, one decimal otherwise. */
