@@ -635,3 +635,63 @@ input[type='range']:active::-webkit-slider-thumb {
   font-size: 11px;
   color: var(--faint);
 }
+
+/* Text layers */
+.layers {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+.layer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+}
+.layer:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.layer.on {
+  background: var(--raised);
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+.layer-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.layer-kind {
+  color: var(--faint);
+  font-size: 11px;
+}
+.layers + .text-input {
+  min-height: 72px;
+}
+.text-input + .btn,
+.text-input + .motion-hint {
+  margin-top: 10px;
+}
+.place-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  width: 100%;
+}
+.place-grid .btn {
+  padding: 0 6px;
+}
+.text-box {
+  cursor: move;
+}

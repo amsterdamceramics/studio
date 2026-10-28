@@ -40,6 +40,12 @@ export function clipData(clip: TypeClip, frame: Frame): string {
   return board + pathData(clip.loops, frame)
 }
 
+/** One block of type and its colour. A board can carry several. */
+export interface TextPaint {
+  loops: BezierLoop[]
+  fill: string
+}
+
 /** A shape filled with a flat colour, used in place of a photo. */
 export interface FlatShape {
   loops: BezierLoop[]
@@ -53,8 +59,8 @@ export interface SvgImage {
   clip?: BezierLoop[]
 }
 
-/** `fill` null leaves the type out, for when the type is only the photo's crop. */
-export function svgDocument(loops: BezierLoop[], frame: Frame, fill: string | null, background: string | null, image?: SvgImage, typeClip?: TypeClip, flat?: FlatShape): string {
+/** An empty `text` leaves the type out, for when the type is only the photo's crop. */
+export function svgDocument(text: TextPaint[], frame: Frame, background: string | null, image?: SvgImage, typeClip?: TypeClip, flat?: FlatShape): string {
   const w = f(frame.w * frame.scale)
   const h = f(frame.h * frame.scale)
   let body = ''
@@ -65,8 +71,8 @@ export function svgDocument(loops: BezierLoop[], frame: Frame, fill: string | nu
     body += `${clip}\n  <image width="${w}" height="${h}" preserveAspectRatio="none"${image.clip ? ' clip-path="url(#crop)"' : ''} href="${image.href}"/>`
   }
   if (flat) body += `\n  <path fill="${flat.fill}" d="${pathData(flat.loops, frame)}"/>`
-  if (fill && typeClip) body += `\n  <clipPath id="hide"><path clip-rule="evenodd" d="${clipData(typeClip, frame)}"/></clipPath>`
-  if (fill) body += `\n  <path fill="${fill}"${typeClip ? ' clip-path="url(#hide)"' : ''} d="${pathData(loops, frame)}"/>`
+  if (text.length && typeClip) body += `\n  <clipPath id="hide"><path clip-rule="evenodd" d="${clipData(typeClip, frame)}"/></clipPath>`
+  for (const t of text) body += `\n  <path fill="${t.fill}"${typeClip ? ' clip-path="url(#hide)"' : ''} d="${pathData(t.loops, frame)}"/>`
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${body}
 </svg>
 `

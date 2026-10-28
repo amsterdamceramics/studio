@@ -1,4 +1,4 @@
-import { clipData, pathData, svgDocument, type FlatShape, type Frame, type SvgImage, type TypeClip } from './svg'
+import { clipData, pathData, svgDocument, type FlatShape, type Frame, type SvgImage, type TextPaint, type TypeClip } from './svg'
 import type { BezierLoop } from './types'
 
 export function download(name: string, blob: Blob) {
@@ -10,15 +10,14 @@ export function download(name: string, blob: Blob) {
   setTimeout(() => URL.revokeObjectURL(url), 2000)
 }
 
-export const svgBlob = (loops: BezierLoop[], frame: Frame, fill: string | null, bg: string | null, image?: SvgImage, typeClip?: TypeClip, flat?: FlatShape) =>
-  new Blob([svgDocument(loops, frame, fill, bg, image, typeClip, flat)], { type: 'image/svg+xml' })
+export const svgBlob = (text: TextPaint[], frame: Frame, bg: string | null, image?: SvgImage, typeClip?: TypeClip, flat?: FlatShape) =>
+  new Blob([svgDocument(text, frame, bg, image, typeClip, flat)], { type: 'image/svg+xml' })
 
-/** `backdrop` is the board without its type (ground plus photo); when given it replaces the flat ground. `fill` null leaves the type out. */
+/** `backdrop` is the board without its type (ground plus photo); when given it replaces the flat ground. An empty `text` leaves the type out. */
 export function drawToCanvas(
   ctx: CanvasRenderingContext2D,
-  loops: BezierLoop[],
+  text: TextPaint[],
   frame: Frame,
-  fill: string | null,
   bg: string | null,
   backdrop?: HTMLCanvasElement | null,
   typeClip?: TypeClip | null,
@@ -33,18 +32,19 @@ export function drawToCanvas(
   } else {
     ctx.clearRect(0, 0, w, h)
   }
-  if (!fill) return
+  if (!text.length) return
   ctx.save()
   if (typeClip) ctx.clip(new Path2D(clipData(typeClip, frame)), 'evenodd')
-  ctx.fillStyle = fill
-  ctx.fill(new Path2D(pathData(loops, frame)))
+  for (const t of text) {
+    ctx.fillStyle = t.fill
+    ctx.fill(new Path2D(pathData(t.loops, frame)))
+  }
   ctx.restore()
 }
 
 export function pngBlob(
-  loops: BezierLoop[],
+  text: TextPaint[],
   frame: Frame,
-  fill: string | null,
   bg: string | null,
   density = 2,
   backdrop?: HTMLCanvasElement | null,
@@ -55,7 +55,7 @@ export function pngBlob(
   canvas.height = Math.ceil(frame.h * frame.scale * density)
   const ctx = canvas.getContext('2d')!
   ctx.scale(density, density)
-  drawToCanvas(ctx, loops, frame, fill, bg, backdrop, typeClip)
+  drawToCanvas(ctx, text, frame, bg, backdrop, typeClip)
   return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('PNG encode failed'))), 'image/png'))
 }
 
@@ -77,7 +77,7 @@ export interface PdfImage {
  * A one-page PDF written by hand: the type is the same cubics as the SVG, as native path operators.
  * A photo, when there is one, goes in as a full-page JPEG underneath; the type stays vector on top.
  */
-export function pdfBlob(loops: BezierLoop[], frame: Frame, fill: string | null, bg: string | null, image?: PdfImage, typeClip?: TypeClip, flat?: FlatShape): Blob {
+export function pdfBlob(text: TextPaint[], frame: Frame, bg: string | null, image?: PdfImage, typeClip?: TypeClip, flat?: FlatShape): Blob {
   const w = frame.w * frame.scale
   const h = frame.h * frame.scale
   const n = (v: number) => v.toFixed(2)
@@ -96,12 +96,13 @@ export function pdfBlob(loops: BezierLoop[], frame: Frame, fill: string | null, 
   if (bg && !(image && !image.clip)) c += `${rgb(bg)} rg\n0 0 ${n(w)} ${n(h)} re\nf\n`
   if (image) c += `q\n${image.clip ? `${path(image.clip)}W n\n` : ''}${n(w)} 0 0 ${n(h)} 0 0 cm\n/Im0 Do\nQ\n`
   if (flat) c += `${rgb(flat.fill)} rg\n${path(flat.loops)}f\n`
-  if (fill && typeClip) {
+  const paints = text.map((t) => `${rgb(t.fill)} rg\n${path(t.loops)}f\n`).join('')
+  if (paints && typeClip) {
     // Even-odd clip: for an inverse clip the board rectangle goes in first, so the outlines become holes.
     const board = typeClip.inverse ? `0 0 ${n(w)} ${n(h)} re\n` : ''
-    c += `q\n${board}${path(typeClip.loops)}W* n\n${rgb(fill)} rg\n${path(loops)}f\nQ\n`
-  } else if (fill) {
-    c += `${rgb(fill)} rg\n${path(loops)}f\n`
+    c += `q\n${board}${path(typeClip.loops)}W* n\n${paints}Q\n`
+  } else {
+    c += paints
   }
 
   const enc = new TextEncoder()

@@ -14,5 +14,5 @@ const params = { ...ZERO_PARAMS, ...JSON.parse(json || '{}') }
 const r = organic(layout.pieces, layout.source, params)
 const pad = EM * 0.25
 const frame = { x: layout.box.x - pad, y: layout.box.y - pad, w: layout.box.w + pad * 2, h: layout.box.h + pad * 2, scale: 200 / EM }
-writeFileSync(out, svgDocument(r.loops, frame, '#000', '#fff'))
+writeFileSync(out, svgDocument([{ loops: r.loops, fill: '#000' }], frame, '#fff'))
 console.log(`${out}: ${layout.pieces.length} glyphs, ${r.loops.length} contours, ${r.nodes} points, ${r.ms.toFixed(0)} ms`)

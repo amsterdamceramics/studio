@@ -54,43 +54,96 @@ const BOARDS = [
   { id: 'square', label: '1:1', title: 'Square post, 1080 × 1080', w: 1080, h: 1080 },
 ] as const
 type BoardId = (typeof BOARDS)[number]['id']
-type Place = 'top' | 'middle' | 'bottom'
 
+/** Board-wide settings. Each block of text is a layer of its own. */
 interface Type {
+  board: BoardId
+  /** Room around the type on the Fit board, in em of the first layer. */
+  padding: number
+}
+
+interface TextLayer {
+  id: number
   text: string
   fontSize: number
   align: Align
-  padding: number
   /** Clay runs the type through the engine; plain sets the font as it is. */
   style: 'clay' | 'plain'
   /** Leading for plain type only; clay type is fixed. */
   lineHeight: number
-  board: BoardId
-  place: Place
+  fill: string
+  /** Top-left of the text box on a fixed board, in board pixels; null places it by its alignment, centred top to bottom. */
+  x: number | null
+  y: number | null
+}
+
+/** A column and row grid like Figma's stretch layout grids, in board pixels. */
+interface Grid {
+  columns: number
+  side: number
+  rows: number
+  top: number
+  gutter: number
+}
+const DEFAULT_GRID: Grid = { columns: 5, side: 80, rows: 10, top: 124, gutter: 20 }
+
+/** Where a 9:16 reel is cropped to 4:5 in the feed, and the room Instagram's own buttons and caption take. */
+const FEED_CROP = { top: 285, bottom: 1635, inset: 124 }
+const REELS_UI = { top: 0.14, bottom: 0.35, side: 0.06 }
+
+function gridLines(w: number, h: number, g: Grid) {
+  const cw = (w - g.side * 2 - g.gutter * (g.columns - 1)) / g.columns
+  const rh = (h - g.top * 2 - g.gutter * (g.rows - 1)) / g.rows
+  return {
+    cols: Array.from({ length: g.columns }, (_, i) => [g.side + i * (cw + g.gutter), g.side + i * (cw + g.gutter) + cw] as [number, number]),
+    rows: Array.from({ length: g.rows }, (_, i) => [g.top + i * (rh + g.gutter), g.top + i * (rh + g.gutter) + rh] as [number, number]),
+  }
+}
+
+interface Paint {
+  id: number
+  loops: BezierLoop[]
+  fill: string
 }
 
 interface Output {
+  /** Each layer's outlines in frame space, with its colour. */
+  paints: Paint[]
+  /** Every layer's outlines together, for the crop shapes and the outline view. */
   loops: BezierLoop[]
   source: BezierLoop[]
   frame: Frame
+  /** Each layer's text box, in board pixels. */
+  boxes: { id: number; x: number; y: number; w: number; h: number }[]
+  /** Room around the type in frame units, for the clay frame. */
+  pad: number
   nodes: number
   ms: number
-  /** True when the type runs past the board's margins. */
+  /** True when the type runs past the board. */
   overflow: boolean
   /** Loop phase this frame was generated at. */
   phase: number
 }
 
-const DEFAULT_TYPE: Type = {
-  text: 'amsterdam\nceramics',
-  fontSize: 160,
-  align: 'left',
-  padding: 0.35,
-  style: 'clay',
-  lineHeight: PLAIN_TYPE.lineHeight,
-  board: 'fit',
-  place: 'middle',
-}
+const DEFAULT_TYPE: Type = { board: 'fit', padding: 0.35 }
+const FIRST_LAYER: TextLayer = { id: 1, text: 'amsterdam\nceramics', fontSize: 160, align: 'left', style: 'clay', lineHeight: PLAIN_TYPE.lineHeight, fill: '#000000', x: null, y: null }
+
+/** Ready-made boards. Text, sizes and places are measured from the studio's own Figma files. */
+const ACID = '#C7FF00'
+const TEMPLATES: { id: string; label: string; title: string; board: BoardId; layers: Omit<TextLayer, 'id'>[] }[] = [
+  {
+    id: 'main',
+    label: 'Main visual',
+    title: 'The 9:16 main visual: clay title, plain strapline, dates and venue',
+    board: 'story',
+    layers: [
+      { text: 'amsterdam\nceramics', style: 'clay', fontSize: 184, align: 'left', lineHeight: PLAIN_TYPE.lineHeight, fill: ACID, x: 80, y: 749 },
+      { text: 'Amsterdam’s exhibition for contemporary ceramics', style: 'plain', fontSize: 32, align: 'center', lineHeight: 1.15, fill: ACID, x: null, y: 409 },
+      { text: '06 - 07 December 2025\n12:00 - 17:00', style: 'plain', fontSize: 32, align: 'left', lineHeight: 1.15, fill: ACID, x: 80, y: 1435 },
+      { text: 'LOODS 6, KNSM-Laan\n143, Amsterdam', style: 'plain', fontSize: 32, align: 'left', lineHeight: 1.15, fill: ACID, x: 644, y: 1435 },
+    ],
+  },
+]
 
 /** The four ways a photo (or, with no photo, a second colour) sits on the board, and the one thing that moves in each. */
 const LAYOUTS: { id: 'full' | 'blob' | 'letters' | 'window'; label: string; plain: string; photo: string; colour: string }[] = [
@@ -110,28 +163,80 @@ const ORGANIC: { key: keyof Omit<OrganicParams, 'seed'>; label: string; hint: st
   { key: 'edgeSmoothness', label: 'Edge smoothness', hint: 'Relaxes the contour, fewer points' },
 ]
 
-/** `phase` is the position in the whole loop; the type runs `cycles` times within it. */
-function render(ts: TypeSetter, type: Type, params: OrganicParams, motion: Motion, phase: number, rest: number, cycles = 1): Output {
-  const setting = type.style === 'plain' ? { tracking: PLAIN_TYPE.tracking, lineHeight: type.lineHeight } : BRAND_TYPE
-  const layout = ts.layout({ text: type.text, align: type.align, textCase: 'none', ...setting })
-  const fr = frameAt(motion, (phase * cycles) % 1, params, rest)
-  const res = type.style === 'plain' ? { loops: layout.source, nodes: layout.source.reduce((n, l) => n + l.segs.length, 0), ms: 0 } : organic(layout.pieces, layout.source, fr.params, fr.mod(layout.box))
-  const pad = type.padding * EM
-  const scale = type.fontSize / EM
+const mapLoops = (loops: BezierLoop[], k: number, dx: number, dy: number): BezierLoop[] => {
+  const m = (p: { x: number; y: number }) => ({ x: p.x * k + dx, y: p.y * k + dy })
+  return loops.map((l) => ({ start: m(l.start), segs: l.segs.map((s) => ({ c1: m(s.c1), c2: m(s.c2), p: m(s.p) })) }))
+}
+
+/** Still clay layers are remembered, so moving or recolouring a layer does not run the engine again. */
+const shapes = new Map<string, { loops: BezierLoop[]; nodes: number; ms: number }>()
+
+/**
+ * `phase` is the position in the whole loop; the type runs `cycles` times within it. On the Fit board
+ * only the first layer shows and the board hugs it; on a fixed board every layer sits where it is placed.
+ */
+function render(ts: TypeSetter, type: Type, layers: TextLayer[], grid: Grid, params: OrganicParams, motion: Motion, phase: number, rest: number, cycles = 1): Output {
   const board = BOARDS.find((b) => b.id === type.board)!
-  const box = layout.box
-  let frame: Frame = { x: box.x - pad, y: box.y - pad, w: box.w + pad * 2, h: box.h + pad * 2, scale }
-  let overflow = false
-  if (board.w) {
-    // A fixed board: the type keeps its pixel size and is placed inside the margins.
-    const w = board.w / scale
-    const h = board.h / scale
-    const x = type.align === 'left' ? box.x - pad : type.align === 'right' ? box.x + box.w + pad - w : box.x + box.w / 2 - w / 2
-    const y = type.place === 'top' ? box.y - pad : type.place === 'bottom' ? box.y + box.h + pad - h : box.y + box.h / 2 - h / 2
-    frame = { x, y, w, h, scale }
-    overflow = box.w + pad * 2 > w + 1 || box.h + pad * 2 > h + 1
+  const shown = board.w ? layers : layers.slice(0, 1)
+  const fr = frameAt(motion, (phase * cycles) % 1, params, rest)
+  const set = shown.map((layer) => {
+    const setting = layer.style === 'plain' ? { tracking: PLAIN_TYPE.tracking, lineHeight: layer.lineHeight } : BRAND_TYPE
+    const layout = ts.layout({ text: layer.text, align: layer.align, textCase: 'none', ...setting })
+    if (layer.style === 'plain') return { layer, layout, loops: layout.source, nodes: layout.source.reduce((n, l) => n + l.segs.length, 0), ms: 0 }
+    const key = motion === 'off' ? JSON.stringify([layer.text, layer.align, params]) : ''
+    let res = key ? shapes.get(key) : undefined
+    if (!res) {
+      res = organic(layout.pieces, layout.source, fr.params, fr.mod(layout.box))
+      if (key) {
+        if (shapes.size > 64) shapes.clear()
+        shapes.set(key, res)
+      }
+    }
+    return { layer, layout, loops: res.loops, nodes: res.nodes, ms: res.ms }
+  })
+  const nodes = set.reduce((n, l) => n + l.nodes, 0)
+  const ms = set.reduce((n, l) => n + l.ms, 0)
+
+  if (!board.w) {
+    // Fit: the board hugs the first layer, in its own engine units.
+    const { layer, layout, loops } = set[0]
+    const pad = type.padding * EM
+    const scale = layer.fontSize / EM
+    const box = layout.box
+    const frame: Frame = { x: box.x - pad, y: box.y - pad, w: box.w + pad * 2, h: box.h + pad * 2, scale }
+    return {
+      paints: [{ id: layer.id, loops, fill: layer.fill }],
+      loops,
+      source: layout.source,
+      frame,
+      boxes: [{ id: layer.id, x: pad * scale, y: pad * scale, w: box.w * scale, h: box.h * scale }],
+      pad,
+      nodes,
+      ms,
+      phase,
+      overflow: false,
+    }
   }
-  return { loops: res.loops, source: layout.source, frame, nodes: res.nodes, ms: res.ms, phase, overflow }
+
+  // A fixed board is laid out in its own pixels; each layer is scaled to its size and moved to its place.
+  const frame: Frame = { x: 0, y: 0, w: board.w, h: board.h, scale: 1 }
+  const paints: Paint[] = []
+  const boxes: Output['boxes'] = []
+  const source: BezierLoop[] = []
+  let overflow = false
+  for (const { layer, layout, loops } of set) {
+    const k = layer.fontSize / EM
+    const box = layout.box
+    const w = box.w * k
+    const h = box.h * k
+    const x = layer.x ?? (layer.align === 'left' ? grid.side : layer.align === 'right' ? board.w - grid.side - w : (board.w - w) / 2)
+    const y = layer.y ?? (board.h - h) / 2
+    paints.push({ id: layer.id, loops: mapLoops(loops, k, x - box.x * k, y - box.y * k), fill: layer.fill })
+    source.push(...mapLoops(layout.source, k, x - box.x * k, y - box.y * k))
+    boxes.push({ id: layer.id, x, y, w, h })
+    if (x < -1 || y < -1 || x + w > board.w + 1 || y + h > board.h + 1) overflow = true
+  }
+  return { paints, loops: paints.flatMap((p) => p.loops), source, frame, boxes, pad: type.padding * shown[0].fontSize, nodes, ms, phase, overflow }
 }
 
 export default function App() {
@@ -139,13 +244,41 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [type, setType] = useState<Type>(DEFAULT_TYPE)
   const [params, setParams] = useState<OrganicParams>({ ...PRESETS[0].params, seed: 1 })
-  const [fill, setFill] = useState('#000000')
+  const [layers, setLayers] = useState<TextLayer[]>([FIRST_LAYER])
+  const [selected, setSelected] = useState(FIRST_LAYER.id)
+  const [grid, setGrid] = useState<Grid>(DEFAULT_GRID)
+  const [guides, setGuides] = useState({ grid: false, safe: false })
   const [background, setBackground] = useState('#FFFFFF')
   const [transparent, setTransparent] = useState(false)
   const [view, setView] = useState<View>({ outline: false, points: false, ghost: false, actualSize: false })
   const [motionSet, setMotion] = useState<Motion>('off')
   // Plain type has no clay to move, so its motion is simply off while that style is chosen.
-  const motion: Motion = type.style === 'plain' ? 'off' : motionSet
+  const fixed = BOARDS.find((b) => b.id === type.board)!
+  const hasClay = (fixed.w ? layers : layers.slice(0, 1)).some((l) => l.style === 'clay')
+  // The Fit board shows only the first text, so that is the one being edited there.
+  const layer = (fixed.w && layers.find((l) => l.id === selected)) || layers[0]
+  const motion: Motion = hasClay ? motionSet : 'off'
+  const setL = <K extends keyof TextLayer>(key: K, v: TextLayer[K]) => setLayers((all) => all.map((l) => (l.id === layer.id ? { ...l, [key]: v } : l)))
+  const moveLayer = useCallback((id: number, x: number, y: number) => setLayers((all) => all.map((l) => (l.id === id ? { ...l, x, y } : l))), [])
+  const addLayer = () => {
+    const id = Math.max(...layers.map((l) => l.id)) + 1
+    setLayers([...layers, { ...FIRST_LAYER, id, text: 'New text', style: 'plain', fontSize: 48, fill: layer.fill, x: null, y: null }])
+    setSelected(id)
+  }
+  const deleteLayer = () => {
+    if (layers.length < 2) return
+    const at = layers.findIndex((l) => l.id === layer.id)
+    const rest = layers.filter((l) => l.id !== layer.id)
+    setLayers(rest)
+    setSelected(rest[Math.max(0, at - 1)].id)
+  }
+  const applyTemplate = (t: (typeof TEMPLATES)[number]) => {
+    setType((tp) => ({ ...tp, board: t.board }))
+    setLayers(t.layers.map((l, i) => ({ ...l, id: i + 1 })))
+    setSelected(1)
+    setGrid(DEFAULT_GRID)
+    setGuides({ grid: true, safe: t.board === 'story' })
+  }
   const [playing, setPlaying] = useState(true)
   const [phase, setPhase] = useState(0)
   const [out, setOut] = useState<Output | null>(null)
@@ -250,9 +383,9 @@ export default function App() {
 
   useEffect(() => {
     if (!ts || animating || recording) return
-    const raf = requestAnimationFrame(() => setOut(render(ts, type, params, motion, moving ? phase : 0, rest, typeCycles)))
+    const raf = requestAnimationFrame(() => setOut(render(ts, type, layers, grid, params, motion, moving ? phase : 0, rest, typeCycles)))
     return () => cancelAnimationFrame(raf)
-  }, [ts, type, params, motion, phase, animating, recording, rest, moving, typeCycles, frameTick])
+  }, [ts, type, layers, grid, params, motion, phase, animating, recording, rest, moving, typeCycles, frameTick])
 
   useEffect(() => {
     if (!ts || !animating) return
@@ -278,7 +411,7 @@ export default function App() {
         p = Math.min(0.9999, Math.max(0, (video.currentTime - trim.start) / clip))
       }
       phaseRef.current = p
-      setOut(render(ts, type, params, motion, p, rest, typeCycles))
+      setOut(render(ts, type, layers, grid, params, motion, p, rest, typeCycles))
       raf = requestAnimationFrame(loop)
     }
     raf = requestAnimationFrame(loop)
@@ -287,7 +420,7 @@ export default function App() {
       video?.pause()
       setPhase(phaseRef.current)
     }
-  }, [ts, type, params, motion, animating, seconds, rest, typeCycles, photo, trim.start, clip])
+  }, [ts, type, layers, grid, params, motion, animating, seconds, rest, typeCycles, photo, trim.start, clip])
 
   // Paused on a video: show the frame at the scrubbed position once the browser has it.
   useEffect(() => {
@@ -304,7 +437,7 @@ export default function App() {
 
   // Undo. Everything that makes up the artwork is gathered into one snapshot; a change is committed
   // to history once it has settled for a moment, so dragging a slider is one step, not hundreds.
-  const snap = { type, params, fill, background, transparent, motion: motionSet, typeSpeed, restBy, photo, trim, gmap, look, cut, place, crop, blob, windowShape, hideType, shapeFill, shapeMotion, shapeSpeed, effect, fxTune, fxSeed, swapTo }
+  const snap = { type, layers, grid, params, background, transparent, motion: motionSet, typeSpeed, restBy, photo, trim, gmap, look, cut, place, crop, blob, windowShape, hideType, shapeFill, shapeMotion, shapeSpeed, effect, fxTune, fxSeed, swapTo }
   type Snap = typeof snap
   const sameAs = (a: Snap, b: Snap) => (Object.keys(a) as (keyof Snap)[]).every((k) => a[k] === b[k])
   const history = useRef<{ committed: Snap; undo: Snap[]; redo: Snap[] } | null>(null)
@@ -331,7 +464,8 @@ export default function App() {
     h.committed = to
     setType(to.type)
     setParams(to.params)
-    setFill(to.fill)
+    setLayers(to.layers)
+    setGrid(to.grid)
     setBackground(to.background)
     setTransparent(to.transparent)
     setMotion(to.motion)
@@ -372,12 +506,25 @@ export default function App() {
     h.undo.push(h.committed)
     restore(target)
   }
-  const keys = useRef({ undo, redo })
+  /** Arrow keys move the selected text on a fixed board, 1 px at a time, 10 with shift. */
+  const nudge = (key: string, by: number) => {
+    const box = fixed.w ? out?.boxes.find((b) => b.id === layer.id) : null
+    if (!box) return false
+    const dx = key === 'ArrowLeft' ? -by : key === 'ArrowRight' ? by : 0
+    const dy = key === 'ArrowUp' ? -by : key === 'ArrowDown' ? by : 0
+    moveLayer(layer.id, Math.round(box.x + dx), Math.round(box.y + dy))
+    return true
+  }
+  const keys = useRef({ undo, redo, nudge })
   useEffect(() => {
-    keys.current = { undo, redo }
+    keys.current = { undo, redo, nudge }
   })
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key.startsWith('Arrow') && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement)) {
+        keys.current.nudge(e.key, e.shiftKey ? 10 : 1) && e.preventDefault()
+        return
+      }
       if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z') return
       // Inside the text box, leave the browser's own text undo alone.
       if (e.target instanceof HTMLTextAreaElement) return
@@ -395,11 +542,11 @@ export default function App() {
   }, [])
 
   const name = useMemo(() => {
-    const slug = type.text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)
+    const slug = layers[0].text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)
     return `ac-${slug || 'type'}`
-  }, [type.text])
+  }, [layers])
 
-  const finalFrame = () => (ts ? render(ts, type, params, motion, moving ? phaseRef.current : 0, rest, typeCycles) : null)
+  const finalFrame = () => (ts ? render(ts, type, layers, grid, params, motion, moving ? phaseRef.current : 0, rest, typeCycles) : null)
 
   const bg = transparent ? null : background
 
@@ -421,10 +568,10 @@ export default function App() {
         return hit.loops
       }
       if (crop === 'letters') return o.loops
-      if (crop === 'blob') return clayFrame(o.frame, type.padding * EM, blob, shapeMove !== 'off' ? { motion: shapeMove, phase: (o.phase * shapeCycles) % 1, rest: shapeRest } : undefined)
+      if (crop === 'blob') return clayFrame(o.frame, o.pad, blob, shapeMove !== 'off' ? { motion: shapeMove, phase: (o.phase * shapeCycles) % 1, rest: shapeRest } : undefined)
       return null
     },
-    [crop, blob, windowShape, shapeMove, shapeCycles, shapeRest, type.padding],
+    [crop, blob, windowShape, shapeMove, shapeCycles, shapeRest],
   )
   /** Where the type may show. With a window, the moving layer sits above the type and hides it. */
   const typeClipFor = useCallback(
@@ -469,8 +616,9 @@ export default function App() {
     const clip = out ? typeClipFor(out) : null
     return out && clip ? clipData(clip, out.frame) : null
   }, [out, typeClipFor])
-  // Inside the letters, the photo is the fill.
-  const ink = photo && crop === 'letters' ? null : fill
+  // Inside the letters, the photo is the fill, so the type has no colour of its own.
+  const lettersOnly = !!photo && crop === 'letters'
+  const textOf = (o: Output) => (lettersOnly ? [] : o.paints)
 
   const addPhoto = async (file: File | undefined) => {
     if (!file) return
@@ -516,14 +664,14 @@ export default function App() {
       const picture = kind === 'png' || !photo ? null : backdropFor(o, 2, true)
       const jpeg = picture ? await canvasBlob(picture, 'image/jpeg', 0.92) : null
       const image = jpeg && (kind === 'svg' || kind === 'copy') ? { href: await dataUrl(jpeg), clip: shape } : undefined
-      if (kind === 'svg') download(`${name}.svg`, svgBlob(o.loops, o.frame, ink, bg, image, hide, flat))
+      if (kind === 'svg') download(`${name}.svg`, svgBlob(textOf(o), o.frame, bg, image, hide, flat))
       if (kind === 'pdf') {
         const page = jpeg && picture ? { jpeg: new Uint8Array(await jpeg.arrayBuffer()), width: picture.width, height: picture.height, clip: shape } : undefined
-        download(`${name}.pdf`, pdfBlob(o.loops, o.frame, ink, bg, page, hide, flat))
+        download(`${name}.pdf`, pdfBlob(textOf(o), o.frame, bg, page, hide, flat))
       }
-      if (kind === 'png') download(`${name}.png`, await pngBlob(o.loops, o.frame, ink, bg, 2, backdropFor(o, 2), hide))
+      if (kind === 'png') download(`${name}.png`, await pngBlob(textOf(o), o.frame, bg, 2, backdropFor(o, 2), hide))
       if (kind === 'copy') {
-        await navigator.clipboard.writeText(svgDocument(o.loops, o.frame, ink, bg, image, hide, flat))
+        await navigator.clipboard.writeText(svgDocument(textOf(o), o.frame, bg, image, hide, flat))
         flash('SVG copied')
         return
       }
@@ -539,7 +687,7 @@ export default function App() {
     const mime = ['video/mp4;codecs=avc1', 'video/webm;codecs=vp9', 'video/webm'].find((m) => MediaRecorder.isTypeSupported(m))
     if (!mime) return flash('This browser cannot record video')
     setRecording(true)
-    const first = render(ts, type, params, motion, 0, rest, typeCycles)
+    const first = render(ts, type, layers, grid, params, motion, 0, rest, typeCycles)
     const canvas = document.createElement('canvas')
     // One video pixel per board pixel, so a 1080 × 1920 board is a 1080 × 1920 file. Video encoders need even sizes.
     canvas.width = Math.round((first.frame.w * first.frame.scale) / 2) * 2
@@ -593,17 +741,38 @@ export default function App() {
         p = t >= count ? 0.9999 : Math.min(0.9999, Math.max(0, (video.currentTime - trim.start) / clip))
       }
       // The last frame sits just short of the seam, so the file itself also repeats cleanly.
-      const o = render(ts, type, params, motion, p, rest, typeCycles)
-      drawToCanvas(ctx, o.loops, o.frame, ink, background, backdropFor(o, density), typeClipFor(o))
+      const o = render(ts, type, layers, grid, params, motion, p, rest, typeCycles)
+      drawToCanvas(ctx, textOf(o), o.frame, background, backdropFor(o, density), typeClipFor(o))
       setOut(o)
       if (t < count) requestAnimationFrame(step)
       else rec.stop()
     }
-    drawToCanvas(ctx, first.loops, first.frame, ink, background, backdropFor(first, density), typeClipFor(first))
+    drawToCanvas(ctx, textOf(first), first.frame, background, backdropFor(first, density), typeClipFor(first))
     rec.start()
     requestAnimationFrame(step)
   }
 
+  const placeLayer = (where: 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom') => {
+    const box = out?.boxes.find((b) => b.id === layer.id)
+    if (!box || !fixed.w) return
+    const x = where === 'left' ? grid.side : where === 'center' ? (fixed.w - box.w) / 2 : where === 'right' ? fixed.w - grid.side - box.w : box.x
+    const y = where === 'top' ? grid.top : where === 'middle' ? (fixed.h - box.h) / 2 : where === 'bottom' ? fixed.h - grid.top - box.h : box.y
+    moveLayer(layer.id, Math.round(x), Math.round(y))
+  }
+  // What the board shows and snaps to while placing text: board edges and middle always, the grid and the reel's safe lines when shown.
+  const story = type.board === 'story'
+  const lines = useMemo(() => (fixed.w ? gridLines(fixed.w, fixed.h, grid) : null), [fixed.w, fixed.h, grid])
+  const snaps = useMemo(() => {
+    if (!fixed.w || !lines) return { x: [], y: [] }
+    const x = [0, fixed.w / 2, fixed.w]
+    const y = [0, fixed.h / 2, fixed.h]
+    if (guides.grid) {
+      x.push(...lines.cols.flat())
+      y.push(...lines.rows.flat())
+    }
+    if (guides.safe && story) y.push(FEED_CROP.top, FEED_CROP.bottom, FEED_CROP.top + FEED_CROP.inset, FEED_CROP.bottom - FEED_CROP.inset)
+    return { x, y }
+  }, [fixed.w, fixed.h, lines, guides, story])
   const setP = (key: keyof OrganicParams, v: number) => setParams((p) => ({ ...p, [key]: v }))
   const setT = <K extends keyof Type>(key: K, v: Type[K]) => setType((t) => ({ ...t, [key]: v }))
   const activePreset = PRESETS.find((pr) => ORGANIC.every((o) => Math.abs(pr.params[o.key] - params[o.key]) < 0.005))?.id
@@ -628,6 +797,13 @@ export default function App() {
           <Toggle on={view.points} onChange={(v) => setView({ ...view, points: v })}>Points</Toggle>
           <Toggle on={view.ghost} onChange={(v) => setView({ ...view, ghost: v })}>Original</Toggle>
           <Toggle on={view.actualSize} onChange={(v) => setView({ ...view, actualSize: v })}>100%</Toggle>
+          {fixed.w > 0 && (
+            <>
+              <span className="divider" aria-hidden="true" />
+              <Toggle on={guides.grid} onChange={(v) => setGuides({ ...guides, grid: v })}>Grid</Toggle>
+              {story && <Toggle on={guides.safe} onChange={(v) => setGuides({ ...guides, safe: v })}>Safe area</Toggle>}
+            </>
+          )}
         </div>
         <div className="exports">
           {moving && (
@@ -1022,15 +1198,51 @@ export default function App() {
 
         {tab === 'type' && (
         <>
-        <Section title="Text">
+        <Section title="Templates">
+          <div className="chips">
+            {TEMPLATES.map((t) => (
+              <button key={t.id} type="button" className="chip" title={t.title} onClick={() => applyTemplate(t)}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </Section>
+
+        <Section
+          title="Text"
+          action={
+            fixed.w > 0 && layers.length > 1 ? (
+              <button type="button" className="link" onClick={deleteLayer}>
+                Delete
+              </button>
+            ) : undefined
+          }
+        >
+          {fixed.w > 0 ? (
+            <div className="layers" role="listbox" aria-label="Text layers">
+              {layers.map((l) => (
+                <button key={l.id} type="button" role="option" aria-selected={l.id === layer.id} className={`layer ${l.id === layer.id ? 'on' : ''}`} onClick={() => setSelected(l.id)}>
+                  <span className="layer-name">{l.text.split('\n')[0].trim() || 'Empty'}</span>
+                  <span className="layer-kind">{l.style === 'clay' ? 'Clay' : 'Plain'}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            layers.length > 1 && <p className="motion-hint">Fit shows only the first text. Pick a board size to see all {layers.length}.</p>
+          )}
           <textarea
             className="text-input"
-            value={type.text}
+            value={layer.text}
             spellCheck={false}
-            rows={4}
+            rows={3}
             aria-label="Text"
-            onChange={(e) => setT('text', e.target.value)}
+            onChange={(e) => setL('text', e.target.value)}
           />
+          {fixed.w > 0 ? (
+            <button type="button" className="btn" onClick={addLayer}>Add text</button>
+          ) : (
+            <p className="motion-hint">Pick a board size to add more text</p>
+          )}
         </Section>
 
         <Section title="Typography">
@@ -1042,23 +1254,23 @@ export default function App() {
             <span className="field-label">Style</span>
             <Segmented
               label="Type style"
-              value={type.style}
-              onChange={(v) => setT('style', v)}
+              value={layer.style}
+              onChange={(v) => setL('style', v)}
               options={[
                 { id: 'clay', label: 'Clay' },
                 { id: 'plain', label: 'Plain' },
               ]}
             />
           </div>
-          {type.style === 'plain' && (
-            <Slider label="Line height" hint="Open it up for longer text" value={type.lineHeight} min={0.8} max={1.2} step={0.05} reset={PLAIN_TYPE.lineHeight} format={(v) => `${Math.round(v * 100)}%`} onChange={(v) => setT('lineHeight', v)} />
+          {layer.style === 'plain' && (
+            <Slider label="Line height" hint="Open it up for longer text" value={layer.lineHeight} min={0.8} max={1.2} step={0.05} reset={PLAIN_TYPE.lineHeight} format={(v) => `${Math.round(v * 100)}%`} onChange={(v) => setL('lineHeight', v)} />
           )}
           <div className="field">
             <span className="field-label">Align</span>
             <Segmented
               label="Alignment"
-              value={type.align}
-              onChange={(v) => setT('align', v)}
+              value={layer.align}
+              onChange={(v) => setL('align', v)}
               options={[
                 { id: 'left', label: 'Left' },
                 { id: 'center', label: 'Center' },
@@ -1066,25 +1278,22 @@ export default function App() {
               ]}
             />
           </div>
-          {type.board !== 'fit' && (
+          {fixed.w > 0 && (
             <div className="field">
-              <span className="field-label">Position</span>
-              <Segmented
-                label="Vertical position"
-                value={type.place}
-                onChange={(v) => setT('place', v)}
-                options={[
-                  { id: 'top', label: 'Top' },
-                  { id: 'middle', label: 'Middle' },
-                  { id: 'bottom', label: 'Bottom' },
-                ]}
-              />
+              <span className="field-label">Place</span>
+              <div className="place-grid" role="group" aria-label="Place on the board">
+                {(['left', 'center', 'right', 'top', 'middle', 'bottom'] as const).map((w) => (
+                  <button key={w} type="button" className="btn" title={`Move to the ${w === 'center' || w === 'middle' ? 'middle' : `${w} margin`}`} onClick={() => placeLayer(w)}>
+                    {w === 'center' ? 'Centre' : w[0].toUpperCase() + w.slice(1)}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
-          <Slider label="Size" value={type.fontSize} min={24} max={600} step={1} reset={160} format={(v) => `${v} px`} onChange={(v) => setT('fontSize', v)} />
+          <Slider label="Size" value={layer.fontSize} min={12} max={600} step={1} reset={160} format={(v) => `${v} px`} onChange={(v) => setL('fontSize', v)} />
           <div className="field">
             <span className="field-label">Colour</span>
-            <Swatches value={fill} onChange={setFill} label="Type colour" />
+            <Swatches value={layer.fill} onChange={(v) => setL('fill', v)} label="Type colour" />
           </div>
         </Section>
         </>
@@ -1105,19 +1314,47 @@ export default function App() {
             Export without background
           </label>
         </Section>
+
+        {fixed.w > 0 && (
+          <Section title="Grid" action={<Reset onClick={() => setGrid(DEFAULT_GRID)} />}>
+            <Slider label="Columns" value={grid.columns} min={1} max={12} step={1} reset={DEFAULT_GRID.columns} format={(v) => `${v}`} onChange={(v) => setGrid({ ...grid, columns: v })} />
+            <Slider label="Side margin" value={grid.side} min={0} max={240} step={1} reset={DEFAULT_GRID.side} format={(v) => `${v} px`} onChange={(v) => setGrid({ ...grid, side: v })} />
+            <Slider label="Rows" value={grid.rows} min={1} max={16} step={1} reset={DEFAULT_GRID.rows} format={(v) => `${v}`} onChange={(v) => setGrid({ ...grid, rows: v })} />
+            <Slider label="Top and bottom margin" value={grid.top} min={0} max={400} step={1} reset={DEFAULT_GRID.top} format={(v) => `${v} px`} onChange={(v) => setGrid({ ...grid, top: v })} />
+            <Slider label="Gutter" value={grid.gutter} min={0} max={80} step={1} reset={DEFAULT_GRID.gutter} format={(v) => `${v} px`} onChange={(v) => setGrid({ ...grid, gutter: v })} />
+          </Section>
+        )}
       </aside>
 
       <main className="center">
         {error ? (
           <div className="empty">Could not load the brand font. {error}</div>
         ) : out ? (
-          <Stage loops={out.loops} source={out.source} frame={out.frame} fill={ink} background={background} backdrop={backdrop} typeClip={typeHide} view={view} />
+          <Stage
+            paints={out.paints}
+            textShown={!lettersOnly}
+            loops={out.loops}
+            source={out.source}
+            frame={out.frame}
+            background={background}
+            backdrop={backdrop}
+            typeClip={typeHide}
+            view={view}
+            boxes={out.boxes}
+            selected={layer.id}
+            editable={fixed.w > 0 && !recording}
+            onSelect={setSelected}
+            onMove={moveLayer}
+            snaps={snaps}
+            grid={guides.grid ? lines : null}
+            safe={guides.safe && story ? { top: FEED_CROP.top, bottom: FEED_CROP.bottom, ui: REELS_UI } : null}
+          />
         ) : (
           <div className="empty">Loading Instrument Sans</div>
         )}
         <footer className="status">
           <span>{size} px</span>
-          {out?.overflow && <span className="warn">Type runs past the margins: lower the size or the margin</span>}
+          {out?.overflow && <span className="warn">Some text runs past the board</span>}
           <span>{out?.nodes ?? 0} points</span>
           <span>{out ? out.ms.toFixed(0) : 0} ms</span>
           {note && <span className="note" role="status">{note}</span>}
@@ -1125,8 +1362,8 @@ export default function App() {
       </main>
 
       <aside className="panel right">
-        {type.style === 'plain' && <p className="panel-note">Plain type is set as the font draws it, so the clay controls and type motion are off. Switch Style to Clay to use them.</p>}
-        <div className={type.style === 'plain' ? 'muted' : undefined}>
+        {!hasClay && <p className="panel-note">Plain type is set as the font draws it, so the clay controls and type motion are off. Set a text's Style to Clay to use them.</p>}
+        <div className={!hasClay ? 'muted' : undefined}>
         <Section title="Presets">
           <div className="chips">
             {PRESETS.map((pr) => (
