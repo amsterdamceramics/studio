@@ -44,7 +44,8 @@ import {
   type OrganicParams,
 } from './engine'
 import { COLORS, PRESETS, RAMPS } from './presets'
-import { Panel, Section, Segmented, Slider, Toggle } from './ui/controls'
+import { IconButton, Panel, Reset, Section, Segmented, Slider, Toggle } from './ui/controls'
+import { AlignBottom, AlignCentre, AlignLeft, AlignMiddle, AlignRight, AlignTop, Minus, Plus } from './ui/icons'
 import { Stage, type View } from './ui/Stage'
 
 const BOARDS = [
@@ -577,9 +578,24 @@ export default function App() {
     return true
   }
   const clear = () => setSelection([])
-  const keys = useRef({ undo, redo, nudge, clear })
+  /**
+   * Single-key shortcuts, as in Figma: ⇧G grid, ⇧S safe area, ⌘A select every text, ⌫ delete the
+   * selected texts, T add a text, Space play or pause. Returns true when the key was used.
+   */
+  const shortcut = (e: KeyboardEvent) => {
+    const k = e.key.toLowerCase()
+    const mod = e.metaKey || e.ctrlKey
+    if (e.shiftKey && !mod && k === 'g' && fixed.w) return setGuides((g) => ({ ...g, grid: !g.grid })), true
+    if (e.shiftKey && !mod && k === 's' && story) return setGuides((g) => ({ ...g, safe: !g.safe })), true
+    if (mod && !e.shiftKey && k === 'a' && fixed.w) return setSelection(layers.map((l) => l.id)), true
+    if ((k === 'backspace' || k === 'delete') && !mod && fixed.w && !none && chosen.length < layers.length) return deleteLayer(), true
+    if (k === 't' && !mod && !e.shiftKey && fixed.w) return addLayer(), true
+    if (k === ' ' && moving) return setPlaying((p) => !p), true
+    return false
+  }
+  const keys = useRef({ undo, redo, nudge, clear, shortcut })
   useEffect(() => {
-    keys.current = { undo, redo, nudge, clear }
+    keys.current = { undo, redo, nudge, clear, shortcut }
   })
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -587,7 +603,12 @@ export default function App() {
         keys.current.clear()
         return
       }
-      if (e.key.startsWith('Arrow') && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement)) {
+      const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement
+      if (!typing && keys.current.shortcut(e)) {
+        e.preventDefault()
+        return
+      }
+      if (e.key.startsWith('Arrow') && !typing) {
         keys.current.nudge(e.key, e.shiftKey ? 10 : 1) && e.preventDefault()
         return
       }
@@ -878,8 +899,8 @@ export default function App() {
           {fixed.w > 0 && (
             <>
               <span className="divider" aria-hidden="true" />
-              <Toggle on={guides.grid} onChange={(v) => setGuides({ ...guides, grid: v })}>Grid</Toggle>
-              {story && <Toggle on={guides.safe} onChange={(v) => setGuides({ ...guides, safe: v })}>Safe area</Toggle>}
+              <Toggle on={guides.grid} onChange={(v) => setGuides({ ...guides, grid: v })} title="Grid (⇧G)">Grid</Toggle>
+              {story && <Toggle on={guides.safe} onChange={(v) => setGuides({ ...guides, safe: v })} title="Safe area (⇧S)">Safe area</Toggle>}
             </>
           )}
         </div>
@@ -959,7 +980,7 @@ export default function App() {
                   />
                   <Slider
                     label="End"
-                    hint={`The loop is ${secs(clip)} s`}
+                    note={`The loop is ${secs(clip)} s`}
                     value={trim.end}
                     min={0}
                     max={photo.duration ?? 0}
@@ -1042,7 +1063,7 @@ export default function App() {
                     <Slider label={photo ? 'Amount of photo' : 'Amount of colour'} value={windowShape.size} reset={0.5} onChange={(v) => setWindowShape({ ...windowShape, size: v })} />
                     <Slider
                       label="Speed"
-                      hint={
+                      note={
                         Math.abs(timing.speed - shapeSpeed) > 0.005
                           ? `Runs at ${timing.speed.toFixed(2)}× the type's pace so the loop closes`
                           : `One loop is ${seconds.toFixed(1)} s`
@@ -1092,7 +1113,7 @@ export default function App() {
                     {shapeMove !== 'off' && (
                       <Slider
                         label="Speed"
-                        hint={
+                        note={
                           Math.abs(timing.speed - shapeSpeed) > 0.005
                             ? `Runs at ${timing.speed.toFixed(2)}× the type's pace so the loop closes`
                             : motion !== 'off'
@@ -1156,7 +1177,7 @@ export default function App() {
                   <>
                     <Slider
                       label="Speed"
-                      hint={
+                      note={
                         Math.abs(fxActual - tune.speed) > 0.02
                           ? `Runs at ${fxActual.toFixed(2)}× so it closes the loop with the ${motion !== 'off' ? 'type' : 'shape'}`
                           : `One pass takes ${(FX_SECONDS / fxActual).toFixed(1)} s`
@@ -1340,20 +1361,6 @@ export default function App() {
         <Section
           title="Text"
           summary={fixed.w ? `${layers.length} ${layers.length === 1 ? 'text' : 'texts'}` : layers[0].text.split('\n')[0]}
-          action={
-            fixed.w > 0 && layers.length > 1 ? (
-              <span className="actions">
-                <button type="button" className="link" onClick={() => setSelection(layers.map((l) => l.id))}>
-                  Select all
-                </button>
-                {chosen.length < layers.length && (
-                  <button type="button" className="link" onClick={deleteLayer}>
-                    Delete
-                  </button>
-                )}
-              </span>
-            ) : undefined
-          }
         >
           {fixed.w > 0 ? (
             <div className="layers" role="listbox" aria-multiselectable="true" aria-label="Text layers" title="Shift or ⌘ click to select more than one">
@@ -1363,6 +1370,17 @@ export default function App() {
                   <span className="layer-kind">{l.style === 'clay' ? 'Clay' : 'Plain'}</span>
                 </button>
               ))}
+              <div className="list-bar">
+                <IconButton label="Add text (T)" onClick={addLayer}>
+                  <Plus />
+                </IconButton>
+                <IconButton label={many ? 'Delete the selected texts (⌫)' : 'Delete this text (⌫)'} onClick={deleteLayer} disabled={none || layers.length < 2 || chosen.length >= layers.length}>
+                  <Minus />
+                </IconButton>
+                <button type="button" className="link" title="⌘A" onClick={() => setSelection(layers.map((l) => l.id))} disabled={chosen.length === layers.length}>
+                  Select All
+                </button>
+              </div>
             </div>
           ) : (
             layers.length > 1 && <p className="motion-hint">Fit shows only the first text. Pick a board size to see all {layers.length}.</p>
@@ -1381,17 +1399,9 @@ export default function App() {
             onChange={(e) => setL('text', e.target.value)}
           />
           )}
-          {fixed.w > 0 ? (
-            <button type="button" className="btn" onClick={addLayer}>Add text</button>
-          ) : (
-            <p className="motion-hint">Pick a board size to add more text</p>
-          )}
+          {!fixed.w && <p className="motion-hint">Pick a board size to add more text</p>}
           {!none && (
           <>
-          <div className="field">
-            <span className="field-label">Font</span>
-            <span className="locked">Instrument Sans Bold</span>
-          </div>
           <div className="field">
             <span className="field-label">Style</span>
             <Segmented
@@ -1423,12 +1433,17 @@ export default function App() {
           {fixed.w > 0 && !many && (
             <div className="field">
               <span className="field-label">Place</span>
-              <div className="place-grid" role="group" aria-label="Place on the board">
-                {(['left', 'center', 'right', 'top', 'middle', 'bottom'] as const).map((w) => (
-                  <button key={w} type="button" className="btn" title={`Move to the ${w === 'center' || w === 'middle' ? 'middle' : `${w} margin`}`} onClick={() => placeLayer(w)}>
-                    {w === 'center' ? 'Centre' : w[0].toUpperCase() + w.slice(1)}
-                  </button>
-                ))}
+              <div className="place-groups">
+                <div className="segmented" role="group" aria-label="Place across the board">
+                  <button type="button" title="Left margin" aria-label="Left margin" onClick={() => placeLayer('left')}><AlignLeft /></button>
+                  <button type="button" title="Middle" aria-label="Middle, across" onClick={() => placeLayer('center')}><AlignCentre /></button>
+                  <button type="button" title="Right margin" aria-label="Right margin" onClick={() => placeLayer('right')}><AlignRight /></button>
+                </div>
+                <div className="segmented" role="group" aria-label="Place up and down the board">
+                  <button type="button" title="Top margin" aria-label="Top margin" onClick={() => placeLayer('top')}><AlignTop /></button>
+                  <button type="button" title="Middle" aria-label="Middle, up and down" onClick={() => placeLayer('middle')}><AlignMiddle /></button>
+                  <button type="button" title="Bottom margin" aria-label="Bottom margin" onClick={() => placeLayer('bottom')}><AlignBottom /></button>
+                </div>
               </div>
             </div>
           )}
@@ -1571,7 +1586,7 @@ export default function App() {
           {motion !== 'off' && (
             <Slider
               label="Speed"
-              hint={`One ${MOTIONS.find((m) => m.id === motion)?.label.toLowerCase()} takes ${(base / typeSpeed).toFixed(1)} s`}
+              note={`One ${MOTIONS.find((m) => m.id === motion)?.label.toLowerCase()} takes ${(base / typeSpeed).toFixed(1)} s`}
               value={typeSpeed}
               min={0.25}
               max={3}
@@ -1590,7 +1605,7 @@ export default function App() {
           <Section title="Playback" pinned>
           {moving && (
             <div className="transport">
-              <button type="button" className="btn" onClick={() => setPlaying(!playing)}>
+              <button type="button" className="btn" title="Space" onClick={() => setPlaying(!playing)}>
                 {playing ? 'Pause' : 'Play'}
               </button>
               <input
@@ -1653,14 +1668,6 @@ function storeTemplates(list: SavedTemplate<unknown>[]) {
 
 /** Seconds for a label: whole when it is whole, one decimal otherwise. */
 const secs = (v: number) => (Math.abs(v - Math.round(v)) < 0.05 ? String(Math.round(v)) : v.toFixed(1))
-
-function Reset({ onClick }: { onClick: () => void }) {
-  return (
-    <button type="button" className="link" onClick={onClick}>
-      Reset
-    </button>
-  )
-}
 
 const dataUrl = (blob: Blob) =>
   new Promise<string>((resolve, reject) => {
