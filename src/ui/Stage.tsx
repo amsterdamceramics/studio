@@ -33,10 +33,12 @@ interface Props {
   view: View
   /** Each layer's text box in board pixels. */
   boxes: Box[]
-  selected: number
+  /** The selected texts. */
+  selected: number[]
   /** Text can be picked and dragged: a fixed board, not recording. */
   editable: boolean
-  onSelect: (id: number) => void
+  /** `add` is true with shift or ⌘ held: add to the selection or take out, instead of replacing it. */
+  onSelect: (id: number, add: boolean) => void
   onMove: (id: number, x: number, y: number) => void
   /** Lines a dragged box's edges and middle snap to, in board pixels. */
   snaps: { x: number[]; y: number[] }
@@ -115,7 +117,10 @@ export function Stage({ paints, textShown, loops, source, frame, background, bac
   const [snapped, setSnapped] = useState<{ x: number | null; y: number | null }>({ x: null, y: null })
   const down = (e: PointerEvent<SVGRectElement>, box: Box) => {
     e.currentTarget.setPointerCapture(e.pointerId)
-    onSelect(box.id)
+    const add = e.shiftKey || e.metaKey || e.ctrlKey
+    onSelect(box.id, add)
+    // Shift-clicking only changes the selection; dragging moves the one text under the pointer.
+    if (add) return
     drag.current = { id: box.id, px: e.clientX, py: e.clientY, box, moved: false }
   }
   const move = (e: PointerEvent<SVGRectElement>) => {
@@ -197,7 +202,7 @@ export function Stage({ paints, textShown, loops, source, frame, background, bac
                 width={b.w}
                 height={b.h}
                 fill="transparent"
-                stroke={b.id === selected ? '#C7FF00' : 'none'}
+                stroke={selected.includes(b.id) ? '#C7FF00' : 'none'}
                 strokeWidth={px * 1.5}
                 onPointerDown={(e) => down(e, b)}
                 onPointerMove={move}

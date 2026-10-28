@@ -30,6 +30,8 @@ export interface WindowShape {
   seed: number
   /** 0..1: 0 keeps every tip, neck and droplet; 1 leaves a few smooth pebbles. */
   round: number
+  /** Islands only, 0..1: 1 scatters them over the whole board; lower gathers them into one group that drifts around together. */
+  spread?: number
 }
 
 const TAU = Math.PI * 2
@@ -87,6 +89,12 @@ export function clayWindow(frame: Frame, shape: WindowShape, phase: number): Bez
   const swell = 0.5 - 0.5 * Math.cos(a)
   const cx = 0.5 + 0.26 * Math.cos(a)
   const cy = H * (0.45 + 0.24 * Math.sin(a * 2))
+  // Where gathered islands sit: a group that tours the board on its own closed path, so the loop still closes.
+  const gather = 1 - Math.min(1, Math.max(0, shape.spread ?? 1))
+  const groupX = 0.5 + 0.22 * Math.sin(a)
+  const groupY = H * (0.5 + 0.2 * Math.sin(a * 2 + 0.6))
+  // The group's reach shrinks as it gathers, but never so far that it is a single blob.
+  const reach = 0.62 - 0.3 * gather
 
   for (let gy = 0; gy < gh; gy++) {
     for (let gx = 0; gx < gw; gx++) {
@@ -109,7 +117,16 @@ export function clayWindow(frame: Frame, shape: WindowShape, phase: number): Bez
       } else if (shape.style === 'cover') {
         f = 0.52 - drift(u, v, 4.2)
       } else {
-        f = drift(u, v, 5.5) - 0.6
+        const scattered = drift(u, v, 5.5) - 0.6
+        if (gather > 0) {
+          // The same islands, but raised near the group's centre and sunk away from it, so they cluster
+          // and travel together, leaving open ground for the photo and the type.
+          const d = Math.hypot(u - groupX, (v - groupY) * 0.8) / reach
+          const near = Math.exp(-d * d * 1.6)
+          f = scattered + gather * (near * 0.8 - 0.4)
+        } else {
+          f = scattered
+        }
       }
       data[k] = f + bias
     }

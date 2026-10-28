@@ -245,7 +245,12 @@ export default function App() {
   const [type, setType] = useState<Type>(DEFAULT_TYPE)
   const [params, setParams] = useState<OrganicParams>({ ...PRESETS[0].params, seed: 1 })
   const [layers, setLayers] = useState<TextLayer[]>([FIRST_LAYER])
-  const [selected, setSelected] = useState(FIRST_LAYER.id)
+  // The texts being edited; the last one picked is the one whose words and place the panel shows.
+  const [selection, setSelection] = useState<number[]>([FIRST_LAYER.id])
+  const setSelected = (id: number) => setSelection([id])
+  /** Shift or ⌘ adds a text to the selection or takes it out, as in Figma. */
+  const pick = (id: number, add: boolean) =>
+    setSelection((sel) => (!add ? [id] : sel.includes(id) ? (sel.length > 1 ? sel.filter((s) => s !== id) : sel) : [...sel, id]))
   const [grid, setGrid] = useState<Grid>(DEFAULT_GRID)
   const [guides, setGuides] = useState({ grid: false, safe: false })
   const [background, setBackground] = useState('#FFFFFF')
@@ -256,9 +261,14 @@ export default function App() {
   const fixed = BOARDS.find((b) => b.id === type.board)!
   const hasClay = (fixed.w ? layers : layers.slice(0, 1)).some((l) => l.style === 'clay')
   // The Fit board shows only the first text, so that is the one being edited there.
-  const layer = (fixed.w && layers.find((l) => l.id === selected)) || layers[0]
+  const chosen = fixed.w ? layers.filter((l) => selection.includes(l.id)) : []
+  const layer = (fixed.w && layers.find((l) => l.id === selection[selection.length - 1])) || chosen[0] || layers[0]
+  const many = chosen.length > 1
+  const isChosen = (id: number) => (many ? selection.includes(id) : id === layer.id)
   const motion: Motion = hasClay ? motionSet : 'off'
-  const setL = <K extends keyof TextLayer>(key: K, v: TextLayer[K]) => setLayers((all) => all.map((l) => (l.id === layer.id ? { ...l, [key]: v } : l)))
+  // Style, size, alignment and colour change every selected text; the words only ever change the one shown.
+  const setL = <K extends keyof TextLayer>(key: K, v: TextLayer[K]) =>
+    setLayers((all) => all.map((l) => (l.id === layer.id || (key !== 'text' && isChosen(l.id)) ? { ...l, [key]: v } : l)))
   const moveLayer = useCallback((id: number, x: number, y: number) => setLayers((all) => all.map((l) => (l.id === id ? { ...l, x, y } : l))), [])
   const addLayer = () => {
     const id = Math.max(...layers.map((l) => l.id)) + 1
@@ -267,8 +277,11 @@ export default function App() {
   }
   const deleteLayer = () => {
     if (layers.length < 2) return
-    const at = layers.findIndex((l) => l.id === layer.id)
-    const rest = layers.filter((l) => l.id !== layer.id)
+    // Deletes every selected text, but always leaves one.
+    const gone = (l: TextLayer) => isChosen(l.id)
+    const at = layers.findIndex(gone)
+    const rest = layers.filter((l) => !gone(l))
+    if (!rest.length) return
     setLayers(rest)
     setSelected(rest[Math.max(0, at - 1)].id)
   }
@@ -796,9 +809,6 @@ export default function App() {
           <button type="button" className="toggle" onClick={undo} disabled={steps.undo === 0} title="Undo the last change (⌘Z)">Undo</button>
           <button type="button" className="toggle" onClick={redo} disabled={steps.redo === 0} title="Redo (⇧⌘Z)">Redo</button>
           <span className="divider" aria-hidden="true" />
-          <Toggle on={view.outline} onChange={(v) => setView({ ...view, outline: v })}>Outline</Toggle>
-          <Toggle on={view.points} onChange={(v) => setView({ ...view, points: v })}>Points</Toggle>
-          <Toggle on={view.ghost} onChange={(v) => setView({ ...view, ghost: v })}>Original</Toggle>
           <Toggle on={view.actualSize} onChange={(v) => setView({ ...view, actualSize: v })}>100%</Toggle>
           {fixed.w > 0 && (
             <>
@@ -961,6 +971,9 @@ export default function App() {
                     </select>
                     <p className="motion-hint">{WINDOW_STYLES.find((w) => w.id === windowShape.style)?.hint}</p>
                     <Slider label="Roundness" hint="From lively tips and droplets to a few smooth pebbles" value={windowShape.round} reset={0.5} onChange={(v) => setWindowShape({ ...windowShape, round: v })} />
+                    {windowShape.style === 'islands' && (
+                      <Slider label="Spread" hint="1 scatters the islands over the board; lower gathers them into one group that drifts around together" value={windowShape.spread ?? 1} reset={1} onChange={(v) => setWindowShape({ ...windowShape, spread: v })} />
+                    )}
                     <Slider label={photo ? 'Amount of photo' : 'Amount of colour'} value={windowShape.size} reset={0.5} onChange={(v) => setWindowShape({ ...windowShape, size: v })} />
                     <Slider
                       label="Speed"
@@ -1226,16 +1239,23 @@ export default function App() {
           summary={fixed.w ? `${layers.length} ${layers.length === 1 ? 'text' : 'texts'}` : layers[0].text.split('\n')[0]}
           action={
             fixed.w > 0 && layers.length > 1 ? (
-              <button type="button" className="link" onClick={deleteLayer}>
-                Delete
-              </button>
+              <span className="actions">
+                <button type="button" className="link" onClick={() => setSelection(layers.map((l) => l.id))}>
+                  Select all
+                </button>
+                {chosen.length < layers.length && (
+                  <button type="button" className="link" onClick={deleteLayer}>
+                    Delete
+                  </button>
+                )}
+              </span>
             ) : undefined
           }
         >
           {fixed.w > 0 ? (
-            <div className="layers" role="listbox" aria-label="Text layers">
+            <div className="layers" role="listbox" aria-multiselectable="true" aria-label="Text layers" title="Shift or ⌘ click to select more than one">
               {layers.map((l) => (
-                <button key={l.id} type="button" role="option" aria-selected={l.id === layer.id} className={`layer ${l.id === layer.id ? 'on' : ''}`} onClick={() => setSelected(l.id)}>
+                <button key={l.id} type="button" role="option" aria-selected={isChosen(l.id)} className={`layer ${isChosen(l.id) ? 'on' : ''}`} onClick={(e) => pick(l.id, e.shiftKey || e.metaKey || e.ctrlKey)}>
                   <span className="layer-name">{l.text.split('\n')[0].trim() || 'Empty'}</span>
                   <span className="layer-kind">{l.style === 'clay' ? 'Clay' : 'Plain'}</span>
                 </button>
@@ -1244,6 +1264,9 @@ export default function App() {
           ) : (
             layers.length > 1 && <p className="motion-hint">Fit shows only the first text. Pick a board size to see all {layers.length}.</p>
           )}
+          {many ? (
+            <p className="motion-hint">{chosen.length} texts selected. Style, size, alignment and colour change for all of them.</p>
+          ) : (
           <textarea
             className="text-input"
             value={layer.text}
@@ -1252,6 +1275,7 @@ export default function App() {
             aria-label="Text"
             onChange={(e) => setL('text', e.target.value)}
           />
+          )}
           {fixed.w > 0 ? (
             <button type="button" className="btn" onClick={addLayer}>Add text</button>
           ) : (
@@ -1289,7 +1313,7 @@ export default function App() {
               ]}
             />
           </div>
-          {fixed.w > 0 && (
+          {fixed.w > 0 && !many && (
             <div className="field">
               <span className="field-label">Place</span>
               <div className="place-grid" role="group" aria-label="Place on the board">
@@ -1319,7 +1343,6 @@ export default function App() {
             <span className="field-label">Ground</span>
             <Swatches value={background} onChange={setBackground} label="Background colour" />
           </div>
-          <Slider label="Margin" value={type.padding} min={0} max={1.5} step={0.05} reset={0.35} format={(v) => `${v.toFixed(2)} em`} onChange={(v) => setT('padding', v)} />
           <label className="check">
             <input type="checkbox" checked={transparent} onChange={(e) => setTransparent(e.target.checked)} />
             Export without background
@@ -1353,9 +1376,9 @@ export default function App() {
             typeClip={typeHide}
             view={view}
             boxes={out.boxes}
-            selected={layer.id}
+            selected={chosen.length ? chosen.map((l) => l.id) : [layer.id]}
             editable={fixed.w > 0 && !recording}
-            onSelect={setSelected}
+            onSelect={pick}
             onMove={moveLayer}
             snaps={snaps}
             grid={guides.grid ? lines : null}
